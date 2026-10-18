@@ -24,14 +24,10 @@ else
     exit 1
 fi
 
-# Check audio dependencies
-for cmd in pacman; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "Note: This script is designed for Arch Linux."
-    fi
-done
-
-if command -v pacman >/dev/null 2>&1; then
+# Check system dependencies
+if ! command -v pacman >/dev/null 2>&1; then
+    echo "Note: This script is designed for Arch Linux."
+else
     for pkg in portaudio espeak-ng; do
         if ! pacman -Q "$pkg" >/dev/null 2>&1; then
             echo "System package may be needed: $pkg"
@@ -40,8 +36,28 @@ if command -v pacman >/dev/null 2>&1; then
     done
 fi
 
+# Check GPU Screen Recorder for replay-buffer clipping
+if ! command -v gpu-screen-recorder >/dev/null 2>&1; then
+    echo
+    echo "Warning: gpu-screen-recorder is not installed."
+    echo "Jarvis will run, but replay-buffer clipping will be unavailable."
+
+    if command -v pacman >/dev/null 2>&1; then
+        if pacman -Si gpu-screen-recorder >/dev/null 2>&1; then
+            echo "Install it with: sudo pacman -S gpu-screen-recorder"
+        elif command -v paru >/dev/null 2>&1; then
+            echo "Install it with: paru -S gpu-screen-recorder"
+        elif command -v yay >/dev/null 2>&1; then
+            echo "Install it with: yay -S gpu-screen-recorder"
+        else
+            echo "Install gpu-screen-recorder from a suitable Arch package source."
+        fi
+    fi
+else
+    echo "GPU Screen Recorder found: $(command -v gpu-screen-recorder)"
+fi
+
 # Create environments without overwriting existing ones
-# Create main environment
 if [[ ! -x .venv/bin/python ]]; then
     python3 -m venv .venv
 fi
@@ -86,7 +102,7 @@ else
     echo "Warning: requirements-kokoro.txt is empty."
 fi
 
-# Create local configuration only if it doesn't exist
+# Create or update local configuration without overwriting user values
 if [[ ! -f .env ]]; then
     if [[ -f .env.example ]]; then
         cp .env.example .env
@@ -95,8 +111,29 @@ if [[ ! -f .env ]]; then
     else
         echo "Warning: .env.example is missing."
     fi
-else
+elif [[ -f .env.example ]]; then
     echo "Existing .env preserved."
+
+    # Add missing replay-buffer settings without changing existing values.
+    for key in \
+        CLIP_MONITOR \
+        CLIP_DURATION \
+        CLIP_FPS \
+        CLIP_QUALITY \
+        CLIP_CODEC \
+        CLIP_FORMAT \
+        CLIP_AUDIO \
+        CLIP_DIRECTORY
+    do
+        if ! grep -qE "^[[:space:]]*${key}=" .env; then
+            value="$(grep -E "^${key}=" .env.example | tail -n 1 || true)"
+
+            if [[ -n "$value" ]]; then
+                printf '\n%s\n' "$value" >> .env
+                echo "Added missing setting: $key"
+            fi
+        fi
+    done
 fi
 
 # Verify required wake-word models

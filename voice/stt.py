@@ -126,13 +126,15 @@ def transcribe(audio: np.ndarray) -> str:
         audio,
         language="en",
         vad_filter=True,
+        initial_prompt=(
+            "Jarvis is a voice assistant. "
+            "Common voice commands include: "
+            "clip that, save a clip, open an application, "
+            "control volume, pause music, resume music."
+        ),
+        beam_size=5,
     )
 
     return " ".join(
         segment.text.strip() for segment in segments
     ).strip()
-
-
-if __name__ == "__main__":
-    audio = record_audio()
-    print(f"You said: {transcribe(audio)}")

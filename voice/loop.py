@@ -7,6 +7,8 @@ from core.assistant import ask
 from voice.stt import record_audio, transcribe
 from voice.tts import speak
 
+# This is an older implementation of the loop with writing instead of voice. 
+# Do not use this unless you want to test something specific
 
 def main():
     print("Jarvis voice mode initialized.")

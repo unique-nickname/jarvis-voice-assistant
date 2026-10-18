@@ -1,6 +1,13 @@
 
 from datetime import datetime
-from tools.desktop import open_application, get_system_status, control_volume, control_app_volume
+from tools.desktop import (
+    open_application,
+    get_system_status,
+    control_volume,
+    control_app_volume,
+    control_media,
+    control_clips,
+)
 
 
 TOOLS = [
@@ -113,6 +120,82 @@ TOOLS = [
             "strict": True,
         },
     },
+    {
+        "type": "function",
+        "name": "control_media",
+        "description": (
+            "Control media playback through MPRIS. Use for commands like "
+            "play, pause, resume, toggle playback, skip tracks, seek, "
+            "check playback status, or identify the currently playing song. "
+            "Works with supported media players and browser media sessions. "
+            "Use now_playing to retrieve the title, artist, album, and URL. "
+            "If the user names a specific player, pass its exact player ID. "
+            "Otherwise, leave player null to select an active player. "
+            "Seeking defaults to 10 seconds."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "play",
+                        "pause",
+                        "play_pause",
+                        "next",
+                        "previous",
+                        "status",
+                        "now_playing",
+                        "seek_forward",
+                        "seek_backward",
+                    ],
+                    "description": "The media operation to perform.",
+                },
+                "player": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Exact player ID from playerctl --list-all, "
+                        "or null for automatic selection."
+                    ),
+                },
+                "seek_seconds": {
+                    "type": "integer",
+                    "description": (
+                        "Seconds to seek forward or backward, from 1 to 300. "
+                        "Use 10 for other actions."
+                    ),
+                },
+            },
+            "required": ["action", "player", "seek_seconds"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "control_clips",
+        "description": (
+            "Manage the GPU Screen Recorder replay buffer. "
+            "Use action 'save' when the user asks to clip, save, "
+            "or capture the last moments of gameplay or desktop activity. "
+            "Use action 'status' to check whether the recorder is running. "
+            "Saving sends a request to the running recorder; it does not "
+            "start the recorder or guarantee the clip has finished writing."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["save", "status"],
+                    "description": "Save the current replay buffer or check recorder status.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
 ]
 
 
@@ -131,4 +214,6 @@ TOOL_HANDLERS = {
     "get_system_status": get_system_status,
     "control_volume": control_volume,
     "control_app_volume": control_app_volume,
+    "control_media": control_media,
+    "control_clips": control_clips,
 }

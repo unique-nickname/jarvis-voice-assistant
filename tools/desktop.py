@@ -1,5 +1,7 @@
 import shutil
 import subprocess
+import os
+import signal
 
 # Friendly names mapped to executable commands.
 # Add or remove entries to match your installed applications.
@@ -241,6 +243,149 @@ def control_app_volume(
     }
 
 
+def control_media(
+    action: str,
+    player: str | None = None,
+    seek_seconds: int = 10,
+) -> dict:
+    """Control media playback through MPRIS using playerctl."""
+    import subprocess
+
+    action = action.strip().casefold()
+    valid_actions = {
+        "play", "pause", "play_pause", "next", "previous",
+        "status", "now_playing", "seek_forward", "seek_backward",
+    }
+
+    if action not in valid_actions:
+        return {
+            "success": False,
+            "error": f"Unsupported media action: {action}",
+        }
+
+    if not 1 <= seek_seconds <= 300:
+        return {
+            "success": False,
+            "error": "seek_seconds must be between 1 and 300.",
+        }
+
+    def run_playerctl(args: list[str]) -> str:
+        result = subprocess.run(
+            ["playerctl", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip()
+
+    try:
+        players = run_playerctl(["--list-all"]).splitlines()
+        players = [p.strip() for p in players if p.strip()]
+
+        if player:
+            if player not in players:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Player '{player}' not found. "
+                        f"Available players: {players}"
+                    ),
+                }
+            selected = player
+        else:
+            # Prefer a player that is currently playing.
+            selected = None
+            for candidate in players:
+                try:
+                    status = run_playerctl([
+                        "--player", candidate, "status"
+                    ])
+                    if status.casefold() == "playing":
+                        selected = candidate
+                        break
+                except subprocess.SubprocessError:
+                    continue
+
+            # If nothing is playing, use the only available player.
+            if selected is None and len(players) == 1:
+                selected = players[0]
+
+            if selected is None:
+                return {
+                    "success": False,
+                    "error": (
+                        "No uniquely identifiable active media player. "
+                        f"Available players: {players}. "
+                        "Specify a player to control paused sessions."
+                    ),
+                }
+
+        prefix = ["--player", selected]
+
+        if action == "status":
+            status = run_playerctl([*prefix, "status"])
+            return {
+                "success": True,
+                "player": selected,
+                "status": status,
+            }
+
+        if action == "now_playing":
+            metadata = {}
+            for field in ("title", "artist", "album"):
+                try:
+                    metadata[field] = run_playerctl([
+                        *prefix, "metadata", f"xesam:{field}"
+                    ]) or None
+                except subprocess.SubprocessError:
+                    metadata[field] = None
+
+            try:
+                metadata["url"] = run_playerctl([
+                    *prefix, "metadata", "xesam:url"
+                ]) or None
+            except subprocess.SubprocessError:
+                metadata["url"] = None
+
+            return {
+                "success": True,
+                "player": selected,
+                **metadata,
+            }
+
+        if action in ("seek_forward", "seek_backward"):
+            position = float(run_playerctl([
+                *prefix, "position"
+            ]))
+            offset = seek_seconds if action == "seek_forward" else -seek_seconds
+            new_position = max(0, position + offset)
+            run_playerctl([
+                *prefix, "position", str(new_position)
+            ])
+        else:
+            command = {
+                "play": "play",
+                "pause": "pause",
+                "play_pause": "play-pause",
+                "next": "next",
+                "previous": "previous",
+            }[action]
+            run_playerctl([*prefix, command])
+
+        return {
+            "success": True,
+            "player": selected,
+            "action": action,
+        }
+
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        return {
+            "success": False,
+            "error": f"Media control failed: {exc}",
+        }
+
+
 def open_application(name: str) -> dict:
     """Launch an approved desktop application."""
     name = name.strip().lower()
@@ -313,3 +458,116 @@ def get_system_status() -> dict:
         status["plugged_in"] = None
 
     return status
+
+
+def control_clips(action: str) -> dict:
+    """Check GPU Screen Recorder or save the current replay buffer."""
+
+    from voice.clip_recorder import get_active_recorder
+
+    action = action.strip().casefold()
+
+    if action not in ("save", "status"):
+        return {
+            "success": False,
+            "error": "Unsupported clip action. Use 'save' or 'status'.",
+        }
+
+    if not shutil.which("gpu-screen-recorder"):
+        return {
+            "success": False,
+            "error": (
+                "GPU Screen Recorder is not installed or is not in PATH."
+            ),
+        }
+
+    recorder = get_active_recorder()
+
+    if recorder is not None:
+        if action == "status":
+            running = recorder.is_running()
+            return {
+                "success": True,
+                "running": running,
+                "message": (
+                    "GPU Screen Recorder is running."
+                    if running
+                    else "GPU Screen Recorder is not running."
+                ),
+            }
+
+        return recorder.save()
+
+    # Find recorder processes by their actual executable path.
+    # This avoids accidentally matching a shell command or another process.
+    recorder_pids = []
+
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as process_file:
+                    argv = process_file.read().split(b"\0")
+
+                if argv and argv[0]:
+                    executable = os.path.basename(
+                        os.fsdecode(argv[0])
+                    )
+
+                    if executable == "gpu-screen-recorder":
+                        recorder_pids.append(int(entry))
+
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+
+    except OSError as exc:
+        return {
+            "success": False,
+            "error": f"Could not inspect running processes: {exc}",
+        }
+
+    if not recorder_pids:
+        return {
+            "success": False,
+            "action": action,
+            "error": (
+                "GPU Screen Recorder is not running. "
+                "Start the replay buffer before saving a clip."
+            ),
+        }
+
+    if len(recorder_pids) > 1:
+        return {
+            "success": False,
+            "error": (
+                "Multiple GPU Screen Recorder processes are running. "
+                "Refusing to signal an ambiguous recorder."
+            ),
+        }
+
+    if action == "status":
+        return {
+            "success": True,
+            "running": True,
+            "message": "GPU Screen Recorder is running.",
+        }
+
+    try:
+        os.kill(recorder_pids[0], signal.SIGUSR1)
+
+        return {
+            "success": True,
+            "action": "save",
+            "message": (
+                "Requested a replay-buffer save. "
+                "The recorder may take a moment to finish writing the clip."
+            ),
+        }
+
+    except (ProcessLookupError, PermissionError, OSError) as exc:
+        return {
+            "success": False,
+            "error": f"Could not signal GPU Screen Recorder: {exc}",
+        }

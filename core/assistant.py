@@ -48,7 +48,6 @@ TOOL USE
 - Explain failures honestly and recover when possible.
 """
 
-
 def ask(user_text: str) -> str:
     response = client.responses.create(
         model=MODEL,

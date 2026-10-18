@@ -14,6 +14,8 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - Text-to-speech using Kokoro.
 - Desktop application launching.
 - Basic system status reporting.
+- Volume control for separate audio streams.
+- Ability to make video clips.
 
 Features are actively being developed, so some functionality may be incomplete.
 

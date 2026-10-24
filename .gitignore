@@ -19,3 +19,4 @@ debug_recording.wav
 # Large speech models, downloaded separately
 models/en_US-lessac-medium.onnx
 models/jarvis/*.onnx
+AGENTS.md

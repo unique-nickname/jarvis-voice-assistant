@@ -37,7 +37,7 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Friendly application name, such as "
-                        "'firefox', 'terminal', or 'steam'."
+                        "'browser', 'terminal', or 'steam'."
                     ),
                 }
             },
@@ -114,8 +114,16 @@ TOOLS = [
                     "type": ["integer", "null"],
                     "description": "Percentage adjustment or target volume; null for mute/unmute.",
                 },
+                "media": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Media title to select one stream; set to null to "
+                        "target all streams for the app. Multiple title "
+                        "matches are refused."
+                    ),
+                },
             },
-            "required": ["app", "action", "amount"],
+            "required": ["app", "action", "amount", "media"],
             "additionalProperties": False,
             "strict": True,
         },
@@ -131,7 +139,8 @@ TOOLS = [
             "Use now_playing to retrieve the title, artist, album, and URL. "
             "If the user names a specific player, pass its exact player ID. "
             "Otherwise, leave player null to select an active player. "
-            "Seeking defaults to 10 seconds."
+            "Pass 10 for actions that do not seek; seek actions should specify "
+            "the desired number of seconds."
         ),
         "parameters": {
             "type": "object",

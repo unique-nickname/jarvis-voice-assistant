@@ -6,24 +6,6 @@ cd "$(dirname "$0")"
 
 echo "=== Jarvis setup ==="
 
-# Check the system
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "Error: python3 is required."
-    exit 1
-fi
-
-# Find Python 3.12, using uv if necessary
-if command -v python3.12 >/dev/null 2>&1; then
-    KOKORO_PYTHON="$(command -v python3.12)"
-elif command -v uv >/dev/null 2>&1; then
-    uv python install 3.12
-    KOKORO_PYTHON="uv run --python 3.12 python"
-else
-    echo "Error: Python 3.12 is required for Kokoro."
-    echo "Install Python 3.12 or install uv: https://docs.astral.sh/uv/"
-    exit 1
-fi
-
 # Check system dependencies
 if ! command -v pacman >/dev/null 2>&1; then
     echo "Note: This script is designed for Arch Linux."
@@ -57,26 +39,50 @@ else
     echo "GPU Screen Recorder found: $(command -v gpu-screen-recorder)"
 fi
 
-# Create environments without overwriting existing ones
+check_python_version() {
+    local interpreter="$1"
+    local expected_version="$2"
+    local actual_version
+
+    actual_version="$("$interpreter" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+
+    if [[ "$actual_version" != "$expected_version" ]]; then
+        echo "Error: $interpreter uses Python $actual_version; expected $expected_version."
+        echo "Replace that environment with the expected Python version, then rerun setup."
+        exit 1
+    fi
+}
+
+# Create the main environment with Python 3.14 without replacing an existing one.
 if [[ ! -x .venv/bin/python ]]; then
-    python3 -m venv .venv
+    if command -v python3.14 >/dev/null 2>&1; then
+        python3.14 -m venv .venv
+    elif command -v uv >/dev/null 2>&1; then
+        uv python install 3.14
+        uv venv --python 3.14 .venv
+    else
+        echo "Error: Python 3.14 is required for the main environment."
+        echo "Install Python 3.14 or install uv: https://docs.astral.sh/uv/"
+        exit 1
+    fi
 fi
+check_python_version .venv/bin/python 3.14
 
 # Create Kokoro environment using Python 3.12
 if [[ ! -x .venv-kokoro/bin/python ]]; then
-    if command -v uv >/dev/null 2>&1; then
+    if command -v python3.12 >/dev/null 2>&1; then
+        python3.12 -m venv .venv-kokoro
+    elif command -v uv >/dev/null 2>&1; then
         uv python install 3.12
         uv venv --python 3.12 .venv-kokoro
-    elif command -v python3.12 >/dev/null 2>&1; then
-        python3.12 -m venv .venv-kokoro
     else
         echo "Error: Python 3.12 is required for Kokoro."
         echo "Install uv or Python 3.12, then rerun setup."
         exit 1
     fi
 fi
+check_python_version .venv-kokoro/bin/python 3.12
 
-# Verify versions
 .venv/bin/python --version
 .venv-kokoro/bin/python --version
 

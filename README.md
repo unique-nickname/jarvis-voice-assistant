@@ -22,7 +22,7 @@ Features are actively being developed, so some functionality may be incomplete.
 - Arch Linux or a compatible Linux distribution.
 - Python 3.14 for the main environment.
 - Python 3.12 for the Kokoro environment.
-- `uv` to manage Python 3.12 if it is not already installed.
+- `uv` if Python 3.14 or Python 3.12 is not already installed.
 - Git.
 - Working microphone and audio output.
 - An OpenAI API key.
@@ -45,9 +45,9 @@ On Arch Linux:
 sudo pacman -S python portaudio espeak-ng git
 ```
 
-Install `uv` if you do not already have it. Follow the official instructions at https://docs.astral.sh/uv/.
+Install `uv` if either required Python version is not already available. Follow the official instructions at https://docs.astral.sh/uv/.
 
-The setup script uses `uv` to obtain Python 3.12 when necessary. Make sure Python 3.14 is also available for the main environment.
+The setup script uses `python3.14` and `python3.12` when available, and uses `uv` to obtain a missing version. It checks both environment versions and stops if an existing environment uses the wrong version; existing environments are not replaced automatically.
 
 ### 3. Run the setup script
 
@@ -63,7 +63,7 @@ The script creates or reuses two virtual environments:
 
 It installs dependencies from `requirements.txt` and `requirements-kokoro.txt`, creates `.env` from `.env.example` if needed, and checks for the required wake-word models.
 
-Existing environments and an existing `.env` file are preserved.
+Existing environments and an existing `.env` file are preserved. If setup reports an environment version mismatch, replace that environment with the required Python version before rerunning setup.
 
 ### 4. Configure your API key
 
@@ -84,7 +84,11 @@ Speak the wake word, then give Jarvis a command. Press `Ctrl+C` in the terminal 
 
 **The setup script cannot find Python 3.12**
 
-Install `uv` and rerun `./setup.sh`. The script uses it to obtain Python 3.12 when needed.
+Install Python 3.12 or `uv`, then rerun `./setup.sh`. The script uses `uv` to obtain Python 3.12 when needed.
+
+**The setup script cannot find Python 3.14**
+
+Install Python 3.14 or `uv`, then rerun `./setup.sh`. The script uses `uv` to obtain Python 3.14 when needed.
 
 **Wake-word detection does not work**
 
@@ -104,7 +108,7 @@ Check that `.env` contains a valid API key and that your account has API access 
 
 **Dependency installation fails**
 
-The requirements files currently reflect the development environments and have not been fully validated on other machines. Some packages may be platform-specific or unnecessary. Report the failing package and Python version when requesting help.
+The requirements files list direct runtime dependencies and selected Kokoro compatibility pins; pip resolves their transitive dependencies. Installation has not been validated on every supported Linux distribution. Report the failing package, Python version, and environment (`.venv` or `.venv-kokoro`) when requesting help.
 
 ## License
 

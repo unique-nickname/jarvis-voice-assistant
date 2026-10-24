@@ -8,6 +8,7 @@ from tools.desktop import (
     control_media,
     control_clips,
 )
+from tools.memory import MEMORY_TOOLS, create_memory_handlers
 
 
 TOOLS = [
@@ -226,3 +227,18 @@ TOOL_HANDLERS = {
     "control_media": control_media,
     "control_clips": control_clips,
 }
+
+
+def tools_for(memory_service=None):
+    """Return the tool schemas available to an assistant request."""
+    if memory_service is None:
+        return TOOLS
+    return [*TOOLS, *MEMORY_TOOLS]
+
+
+def handlers_for(memory_service=None):
+    """Return static handlers plus handlers bound to the active memory service."""
+    handlers = dict(TOOL_HANDLERS)
+    if memory_service is not None:
+        handlers.update(create_memory_handlers(memory_service))
+    return handlers

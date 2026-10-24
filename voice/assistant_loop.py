@@ -8,6 +8,8 @@ from voice.stt import record_audio, transcribe
 from voice.tts import initialize, speak, speak_async, shutdown
 from voice.wake_word import wait_for_wake_word
 from voice.clip_recorder import ClipRecorder
+from memory import MemoryService
+from tools.registry import handlers_for, tools_for
 import time
 
 import re
@@ -36,14 +38,17 @@ def normalize_voice_command(text: str) -> str:
     return text
 
 def main():
-    initialize()
-
-    recorder = ClipRecorder()
-    recorder.start()
-
-    print("Jarvis is online. Press Ctrl+C to stop.")
+    memory_service = MemoryService()
+    recorder = None
 
     try:
+        recorder = ClipRecorder()
+        assistant_tools = tools_for(memory_service)
+        tool_handlers = handlers_for(memory_service)
+        initialize()
+        recorder.start()
+        print("Jarvis is online. Press Ctrl+C to stop.")
+
         while True:
             initial_audio = wait_for_wake_word()
             audio = record_audio(initial_audio=initial_audio)
@@ -58,7 +63,11 @@ def main():
 
             print(f"You: {text}")
 
-            response = ask(text)
+            response = ask(
+                text,
+                tools=assistant_tools,
+                tool_handlers=tool_handlers,
+            )
             print(f"Jarvis: {response}")
 
             speak(response)
@@ -70,8 +79,14 @@ def main():
         print("\nJarvis shutting down.")
 
     finally:
-        recorder.stop()
-        shutdown()
+        try:
+            if recorder is not None:
+                recorder.stop()
+        finally:
+            try:
+                shutdown()
+            finally:
+                memory_service.close()
 
 
 

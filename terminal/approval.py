@@ -119,6 +119,13 @@ class ApprovalQueue:
                 if record.state is ApprovalState.PENDING
             )
 
+    def pending_ticket(self, request_id: str) -> ApprovalTicket:
+        """Return the canonical pending plan for a request ID."""
+        with self._lock:
+            record = self._get_request(request_id)
+            self._ensure_pending(record)
+            return self._ticket(request_id, record)
+
     def approve_from_ui(self, request_id: str) -> ApprovalTicket:
         with self._lock:
             record = self._get_request(request_id)

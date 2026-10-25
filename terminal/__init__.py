@@ -9,6 +9,7 @@ from terminal.approval import (
     ApprovalState,
     ApprovalTicket,
 )
+from terminal.approval_ui import ApprovalWindowError, review_approval
 from terminal.policy import (
     ChangePreview,
     OperationDefinition,
@@ -23,10 +24,12 @@ __all__ = [
     "ApprovalQueue",
     "ApprovalState",
     "ApprovalTicket",
+    "ApprovalWindowError",
     "ChangePreview",
     "OperationDefinition",
     "OperationPlan",
     "OperationRegistry",
     "RiskTier",
     "TerminalPolicyError",
+    "review_approval",
 ]

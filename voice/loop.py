@@ -5,6 +5,7 @@ load_dotenv()
 
 from core.assistant import ask
 from memory import MemoryService
+from terminal.operations import create_terminal_service
 from tools.registry import handlers_for, tools_for
 from voice.stt import record_audio, transcribe
 from voice.tts import speak
@@ -15,8 +16,9 @@ from voice.tts import speak
 def main():
     memory_service = MemoryService()
     try:
-        assistant_tools = tools_for(memory_service)
-        tool_handlers = handlers_for(memory_service)
+        terminal_service = create_terminal_service()
+        assistant_tools = tools_for(memory_service, terminal_service)
+        tool_handlers = handlers_for(memory_service, terminal_service)
         print("Jarvis voice mode initialized.")
 
         while True:

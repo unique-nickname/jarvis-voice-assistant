@@ -18,6 +18,29 @@ else
     done
 fi
 
+check_runtime_executable() {
+    local executable_path="$1"
+    local package_name="$2"
+    local feature_name="$3"
+
+    if [[ ! -x "$executable_path" ]]; then
+        echo "Warning: $executable_path is missing; $feature_name will be unavailable."
+        if command -v pacman >/dev/null 2>&1; then
+            echo "Install it with: sudo pacman -S $package_name"
+        fi
+    fi
+}
+
+check_runtime_executable /usr/bin/bwrap bubblewrap "the sandboxed kernel information tool"
+check_runtime_executable /usr/bin/prlimit util-linux "the sandboxed kernel information tool"
+
+if [[ ! -x /usr/bin/zenity && ! -x /bin/zenity ]]; then
+    echo "Warning: zenity is missing; the local approval window will be unavailable."
+    if command -v pacman >/dev/null 2>&1; then
+        echo "Install it with: sudo pacman -S zenity"
+    fi
+fi
+
 # Check GPU Screen Recorder for replay-buffer clipping
 if ! command -v gpu-screen-recorder >/dev/null 2>&1; then
     echo
@@ -120,8 +143,9 @@ if [[ ! -f .env ]]; then
 elif [[ -f .env.example ]]; then
     echo "Existing .env preserved."
 
-    # Add missing replay-buffer settings without changing existing values.
+    # Add missing optional settings without changing existing values.
     for key in \
+        TERMINAL_APPROVAL_FLOATING \
         CLIP_MONITOR \
         CLIP_DURATION \
         CLIP_FPS \

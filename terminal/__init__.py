@@ -1,6 +1,6 @@
-"""Policy and approval primitives for a future terminal executor.
+"""Policy, approval, and routing primitives for terminal operations.
 
-This package deliberately does not execute processes or expose assistant tools.
+This package does not execute arbitrary commands or expose assistant tools.
 """
 
 from terminal.approval import (
@@ -18,6 +18,7 @@ from terminal.policy import (
     RiskTier,
     TerminalPolicyError,
 )
+from terminal.service import ExecutionStatus, OperationExecution, TerminalService
 
 __all__ = [
     "ApprovalError",
@@ -26,10 +27,13 @@ __all__ = [
     "ApprovalTicket",
     "ApprovalWindowError",
     "ChangePreview",
+    "ExecutionStatus",
+    "OperationExecution",
     "OperationDefinition",
     "OperationPlan",
     "OperationRegistry",
     "RiskTier",
     "TerminalPolicyError",
+    "TerminalService",
     "review_approval",
 ]

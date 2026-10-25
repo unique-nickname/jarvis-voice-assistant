@@ -14,6 +14,7 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - Text-to-speech using Kokoro.
 - Desktop application launching.
 - Basic system status reporting.
+- Sandboxed Linux kernel information through one fixed diagnostic tool; no general-purpose shell tool is exposed.
 - Volume control for separate audio streams.
 - Ability to make video clips.
 
@@ -29,6 +30,8 @@ Features are actively being developed, so some functionality may be incomplete.
 - Working microphone and audio output.
 - An OpenAI API key.
 - System audio dependencies: `portaudio` and `espeak-ng`.
+- `bubblewrap` and `prlimit` (from `util-linux`) for the sandboxed kernel information tool.
+- `zenity` for the local approval window used by future Tier 2 operations.
 
 ## Installation
 
@@ -46,6 +49,14 @@ On Arch Linux:
 ```bash
 sudo pacman -S python portaudio espeak-ng git
 ```
+
+For the sandboxed kernel diagnostic and approval window, install their system tools as well:
+
+```bash
+sudo pacman -S bubblewrap util-linux zenity
+```
+
+`setup.sh` checks for these executables but does not install system packages. If Bubblewrap or `prlimit` is missing, `get_kernel_info` fails closed. If Zenity is missing, the approval window cannot open. Hyprland and `hyprctl` are optional; without them, the approval window uses the compositor's normal layout.
 
 Install `uv` if either required Python version is not already available. Follow the official instructions at https://docs.astral.sh/uv/.
 
@@ -71,6 +82,8 @@ Existing environments and an existing `.env` file are preserved. If setup report
 
 Open `.env` in a text editor
 Add your own OpenAI API key and check the model setting. Use the format provided in `.env.example`.
+
+`TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to an existing `.env` if it is missing, without changing an existing value.
 
 ### 5. Start Jarvis
 
@@ -111,6 +124,14 @@ Check that `.env` contains a valid API key and that your account has API access 
 **Dependency installation fails**
 
 The requirements files list direct runtime dependencies and selected Kokoro compatibility pins; pip resolves their transitive dependencies. Installation has not been validated on every supported Linux distribution. Report the failing package, Python version, and environment (`.venv` or `.venv-kokoro`) when requesting help.
+
+**The kernel information tool fails**
+
+Check that `/usr/bin/bwrap` and `/usr/bin/prlimit` are installed. The sandbox also requires unprivileged user and network namespaces to be available. Setup warns when the executables are missing; it cannot verify that namespace restrictions are permitted by the running system.
+
+**The approval window does not open**
+
+Install `zenity` and run Jarvis from a graphical desktop session. Tier 2 operations remain unapproved if the local window is unavailable.
 
 ## License
 

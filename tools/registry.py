@@ -11,6 +11,25 @@ from tools.desktop import (
 from tools.memory import MEMORY_TOOLS, create_memory_handlers
 
 
+TERMINAL_TOOLS = [
+    {
+        "type": "function",
+        "name": "get_kernel_info",
+        "description": (
+            "Read the Linux kernel name and release using a fixed, sandboxed "
+            "diagnostic. This tool does not read user files or accept commands."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    }
+]
+
+
 TOOLS = [
     {
         "type": "function",
@@ -229,16 +248,25 @@ TOOL_HANDLERS = {
 }
 
 
-def tools_for(memory_service=None):
+def tools_for(memory_service=None, terminal_service=None):
     """Return the tool schemas available to an assistant request."""
-    if memory_service is None:
-        return TOOLS
-    return [*TOOLS, *MEMORY_TOOLS]
+    available_tools = TOOLS
+    if memory_service is not None:
+        available_tools = [*available_tools, *MEMORY_TOOLS]
+    if terminal_service is not None:
+        available_tools = [*available_tools, *TERMINAL_TOOLS]
+    return available_tools
 
 
-def handlers_for(memory_service=None):
-    """Return static handlers plus handlers bound to the active memory service."""
+def handlers_for(memory_service=None, terminal_service=None):
+    """Return static handlers plus those bound to active services."""
     handlers = dict(TOOL_HANDLERS)
     if memory_service is not None:
         handlers.update(create_memory_handlers(memory_service))
+    if terminal_service is not None:
+
+        def get_kernel_info():
+            return terminal_service.execute("system.kernel_info", {}).as_dict()
+
+        handlers["get_kernel_info"] = get_kernel_info
     return handlers

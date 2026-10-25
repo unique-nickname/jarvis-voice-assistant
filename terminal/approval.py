@@ -1,6 +1,6 @@
-"""In-memory approval queue for future Tier 2 operations.
+"""In-memory approval queue for Tier 2 operations.
 
-The queue never executes commands. A future local UI may approve or deny a
+The queue never executes commands. The local approval UI may approve or deny a
 pending request; assistant tools must not be given access to those methods.
 """
 
@@ -52,7 +52,7 @@ class _ApprovalRecord:
 class ApprovalQueue:
     """Manage one-time approval for plans classified as Tier 2.
 
-    This class does not authenticate a user. Only a future local UI should be
+    This class does not authenticate a user. Only the local UI should be
     allowed to call the `*_from_ui` methods; assistant tools must never expose
     them.
     """

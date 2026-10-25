@@ -9,6 +9,7 @@ from voice.tts import initialize, speak, speak_async, shutdown
 from voice.wake_word import wait_for_wake_word
 from voice.clip_recorder import ClipRecorder
 from memory import MemoryService
+from terminal.operations import create_terminal_service
 from tools.registry import handlers_for, tools_for
 import time
 
@@ -43,8 +44,9 @@ def main():
 
     try:
         recorder = ClipRecorder()
-        assistant_tools = tools_for(memory_service)
-        tool_handlers = handlers_for(memory_service)
+        terminal_service = create_terminal_service()
+        assistant_tools = tools_for(memory_service, terminal_service)
+        tool_handlers = handlers_for(memory_service, terminal_service)
         initialize()
         recorder.start()
         print("Jarvis is online. Press Ctrl+C to stop.")

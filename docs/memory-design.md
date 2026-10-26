@@ -1,6 +1,6 @@
 # Memory design baseline
 
-**Status:** The storage foundation and model-facing memory tools are implemented. The main voice loop, text REPL, and legacy push-to-talk loop create one memory service for the process and close it during shutdown. Memory is retrieved on demand through bounded search; automatic transcript summarization and unconditional prompt injection are not implemented.
+**Status:** The storage foundation and model-facing memory tools are implemented. The main voice loop and text REPL create one memory service for the process and close it during shutdown. Memory is retrieved on demand through bounded search; automatic transcript summarization and unconditional prompt injection are not implemented.
 
 This document records the agreed starting point for adding memory to Jarvis. It should be updated if implementation reveals a concrete reason to change a decision.
 

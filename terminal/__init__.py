@@ -1,7 +1,4 @@
-"""Policy, approval, and routing primitives for terminal operations.
-
-This package does not execute arbitrary commands or expose assistant tools.
-"""
+"""Policy, approval, and sandboxed command execution for terminal tools."""
 
 from terminal.approval import (
     ApprovalError,
@@ -19,6 +16,12 @@ from terminal.policy import (
     TerminalPolicyError,
 )
 from terminal.service import ExecutionStatus, OperationExecution, TerminalService
+from terminal.command_policy import (
+    CommandAssessment,
+    assess_command,
+    tier_overrides_from_environment,
+)
+from terminal.command_service import CommandTerminalService
 
 __all__ = [
     "ApprovalError",
@@ -27,6 +30,8 @@ __all__ = [
     "ApprovalTicket",
     "ApprovalWindowError",
     "ChangePreview",
+    "CommandAssessment",
+    "CommandTerminalService",
     "ExecutionStatus",
     "OperationExecution",
     "OperationDefinition",
@@ -35,5 +40,7 @@ __all__ = [
     "RiskTier",
     "TerminalPolicyError",
     "TerminalService",
+    "assess_command",
     "review_approval",
+    "tier_overrides_from_environment",
 ]

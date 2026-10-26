@@ -1,4 +1,4 @@
-"""Run a tiny allowlist of commands in a constrained Bubblewrap sandbox."""
+"""Run classified terminal commands in a constrained Bubblewrap sandbox."""
 
 from __future__ import annotations
 
@@ -14,20 +14,72 @@ from typing import Sequence
 
 _BWRAP = Path("/usr/bin/bwrap")
 _PRLIMIT = "/usr/bin/prlimit"
-_ALLOWED_EXECUTABLES = frozenset({"/usr/bin/uname"})
 _MAX_ARGUMENTS = 16
 _MAX_ARGUMENT_BYTES = 2_048
 _DEFAULT_TIMEOUT_SECONDS = 5.0
+_MAX_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_BYTES = 8_192
-_MAX_TMP_BYTES = 1_048_576
+_MAX_COMMAND_TMP_BYTES = 67_108_864
 _MAX_PROCESSES = 32
-_MAX_CPU_SECONDS = 4
+_MAX_COMMAND_FILE_BYTES = 268_435_456
 _MAX_ADDRESS_SPACE_BYTES = 268_435_456
 _OUTER_ENVIRONMENT = {
     "PATH": "/usr/bin:/bin",
     "LANG": "C",
     "LC_ALL": "C",
 }
+_SECRET_DIRECTORY_NAMES = frozenset(
+    {
+        ".aws",
+        ".cache",
+        ".docker",
+        ".gnupg",
+        ".kube",
+        ".mozilla",
+        ".password-store",
+        ".ssh",
+        "bravesoftware",
+        "keepass",
+        "signal",
+        "telegram desktop",
+        "bitwarden",
+        "chromium",
+        "discord",
+        "google-chrome",
+        "keyrings",
+        "microsoft-edge",
+        "opera",
+        "vesktop",
+        "zen",
+    }
+)
+_SECRET_DIRECTORY_SUFFIXES = (
+    (".config", "gcloud"),
+    (".config", "gh"),
+    (".config", "rclone"),
+    (".local", "share", "keyrings"),
+)
+_SECRET_FILENAMES = frozenset(
+    {
+        ".git-credentials",
+        ".netrc",
+        ".npmrc",
+        ".pgpass",
+        ".pypirc",
+        "application_default_credentials.json",
+        "credentials",
+        "credentials.json",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "id_rsa",
+        "secrets.json",
+        "token",
+        "token.json",
+    }
+)
+_SECRET_FILE_SUFFIXES = (".key", ".pem", ".p12", ".pfx")
+_SECRET_SCAN_LIMIT = 2_048
 
 
 class SandboxError(RuntimeError):
@@ -42,36 +94,92 @@ class SandboxCommandResult:
 
 
 class BubblewrapExecutor:
-    """Execute trusted fixed-argv commands with isolated host access.
+    """Execute direct read-only argv or reviewed Fish commands in Bubblewrap.
 
-    There is no shell, caller-provided environment, or caller-provided working
-    directory. The executable allowlist is deliberately narrow. Bubblewrap
-    setup failures fail closed; commands never fall back to host execution.
+    Recognized read-only commands use direct argv without a shell. All other
+    commands use Fish; the terminal service owns their approval routing.
+    Bubblewrap setup failures fail closed with no host fallback.
     """
 
     def __init__(self, *, timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS) -> None:
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
-            or not 0 < timeout_seconds <= _DEFAULT_TIMEOUT_SECONDS
+            or not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS
         ):
-            raise ValueError("Sandbox timeout must be between 0 and 5 seconds.")
+            raise ValueError("Sandbox timeout must be between 0 and 30 seconds.")
         self._timeout_seconds = float(timeout_seconds)
 
-    def run(
+    def run_read_only_argv(
         self,
-        executable: str,
-        arguments: Sequence[str] = (),
+        argv: Sequence[str],
+        *,
+        access_root: str | Path,
+        working_directory: str | Path,
     ) -> SandboxCommandResult:
-        """Run one allowlisted executable and return bounded UTF-8 output."""
-        command_arguments = self._validate_command(executable, arguments)
+        """Run one already-classified Tier 1 argv without invoking a shell."""
+        root, cwd = self._validate_command_scope(access_root, working_directory)
+        command_argv = self._validate_argv(argv)
+        executable = Path(command_argv[0])
+        if not executable.is_absolute():
+            executable = Path("/usr/bin", command_argv[0])
+        try:
+            executable = executable.resolve(strict=True)
+        except OSError as exc:
+            raise SandboxError("Read-only command executable is unavailable.") from exc
+        if executable.parent != Path("/usr/bin") or not os.access(executable, os.X_OK):
+            raise SandboxError("Read-only command executable is outside the system path.")
+        process_argv = (str(executable), *command_argv[1:])
+        return self._run_bwrap(
+            self._build_sandbox_command(
+                process_argv,
+                root=root,
+                cwd=cwd,
+                writable=False,
+                timeout_seconds=self._timeout_seconds,
+            )
+        )
+
+    def run_fish_command(
+        self,
+        command: str,
+        *,
+        access_root: str | Path,
+        working_directory: str | Path,
+        writable: bool,
+        network_access: bool = False,
+    ) -> SandboxCommandResult:
+        """Run a Fish command inside a rootless sandbox scoped to one tree."""
+        root, cwd = self._validate_command_scope(access_root, working_directory)
+        if not isinstance(command, str) or not command.strip() or "\x00" in command:
+            raise SandboxError("Fish command is invalid.")
+        if len(command.encode("utf-8")) > 4_096:
+            raise SandboxError("Fish command exceeds the size limit.")
+        if type(writable) is not bool:
+            raise SandboxError("Sandbox write mode is invalid.")
+        if type(network_access) is not bool:
+            raise SandboxError("Sandbox network mode is invalid.")
+        fish = Path("/usr/bin/fish")
+        if not fish.is_file() or not os.access(fish, os.X_OK):
+            raise SandboxError("Fish is unavailable; command denied.")
+        return self._run_bwrap(
+            self._build_sandbox_command(
+                (str(fish), "--no-config", "--command", command),
+                root=root,
+                cwd=cwd,
+                writable=writable,
+                network_access=network_access,
+                timeout_seconds=self._timeout_seconds,
+            )
+        )
+
+    def _run_bwrap(self, command: list[str]) -> SandboxCommandResult:
         if not _BWRAP.is_file() or not os.access(_BWRAP, os.X_OK):
             raise SandboxError("Bubblewrap is unavailable; command denied.")
         if not Path(_PRLIMIT).is_file() or not os.access(_PRLIMIT, os.X_OK):
             raise SandboxError("The process-limit helper is unavailable; command denied.")
-
         process = subprocess.Popen(
-            self._build_command(executable, command_arguments),
+            command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -101,48 +209,97 @@ class BubblewrapExecutor:
         )
 
     @staticmethod
-    def _validate_command(
-        executable: str,
-        arguments: Sequence[str],
-    ) -> tuple[str, ...]:
-        if (
-            not isinstance(executable, str)
-            or executable not in _ALLOWED_EXECUTABLES
-        ):
-            raise SandboxError("Executable is not allowlisted.")
-        if isinstance(arguments, (str, bytes)) or not isinstance(arguments, Sequence):
-            raise SandboxError("Command arguments must be a sequence of strings.")
-        if len(arguments) > _MAX_ARGUMENTS:
-            raise SandboxError("Too many command arguments.")
-        detached_arguments = tuple(arguments)
-        if any(
-            not isinstance(argument, str) or "\x00" in argument
-            for argument in detached_arguments
-        ):
-            raise SandboxError("Command arguments are invalid.")
-        argument_bytes = sum(
-            len(argument.encode("utf-8")) for argument in detached_arguments
-        )
-        if argument_bytes > _MAX_ARGUMENT_BYTES:
-            raise SandboxError("Command arguments exceed the size limit.")
-        return detached_arguments
+    def _validate_argv(argv: Sequence[str]) -> tuple[str, ...]:
+        if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
+            raise SandboxError("Command argv must be a sequence of strings.")
+        if not argv or len(argv) > _MAX_ARGUMENTS:
+            raise SandboxError("Command argv has an invalid argument count.")
+        detached = tuple(argv)
+        if any(not isinstance(value, str) or "\x00" in value for value in detached):
+            raise SandboxError("Command argv contains invalid text.")
+        if sum(len(value.encode("utf-8")) for value in detached) > _MAX_ARGUMENT_BYTES:
+            raise SandboxError("Command argv exceeds the size limit.")
+        return detached
 
     @staticmethod
-    def _build_command(executable: str, arguments: tuple[str, ...]) -> list[str]:
-        command = [
+    def _validate_command_scope(
+        access_root: str | Path,
+        working_directory: str | Path,
+    ) -> tuple[Path, Path]:
+        try:
+            root = Path(access_root).expanduser().resolve(strict=True)
+            cwd = Path(working_directory).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError, TypeError) as exc:
+            raise SandboxError("Command path is unavailable.") from exc
+        if not root.is_dir() or not cwd.is_dir():
+            raise SandboxError("Command root and working directory must be directories.")
+        if root == Path("/"):
+            raise SandboxError("The filesystem root cannot be a command access root.")
+        if root in {
+            Path("/usr"),
+            Path("/bin"),
+            Path("/sbin"),
+            Path("/lib"),
+            Path("/lib64"),
+            Path("/etc"),
+            Path("/proc"),
+            Path("/dev"),
+            Path("/run"),
+            Path("/sys"),
+            Path("/tmp"),
+            Path("/opt"),
+            Path("/var"),
+        }:
+            raise SandboxError("System mount points cannot be command access roots.")
+        for system_root in (
+            Path("/usr"),
+            Path("/bin"),
+            Path("/sbin"),
+            Path("/lib"),
+            Path("/lib64"),
+            Path("/etc"),
+            Path("/proc"),
+            Path("/dev"),
+            Path("/run"),
+            Path("/sys"),
+            Path("/opt"),
+            Path("/var"),
+        ):
+            if root.is_relative_to(system_root):
+                raise SandboxError("System paths cannot be command access roots.")
+        try:
+            cwd.relative_to(root)
+        except ValueError as exc:
+            raise SandboxError("Working directory is outside the allowed root.") from exc
+        return root, cwd
+
+    @classmethod
+    def _build_sandbox_command(
+        cls,
+        process_argv: Sequence[str],
+        *,
+        root: Path,
+        cwd: Path,
+        writable: bool,
+        network_access: bool = False,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    ) -> list[str]:
+        cpu_seconds = max(1, int(timeout_seconds) - 1)
+        bwrap_command = [
             str(_BWRAP),
             "--die-with-parent",
             "--unshare-user",
             "--unshare-pid",
-            "--unshare-net",
             "--unshare-uts",
             "--unshare-ipc",
             "--disable-userns",
             "--assert-userns-disabled",
             "--uid",
-            "65534",
+            "0",
             "--gid",
-            "65534",
+            "0",
+            "--cap-drop",
+            "ALL",
             "--ro-bind",
             "/usr",
             "/usr",
@@ -150,51 +307,160 @@ class BubblewrapExecutor:
             "/bin",
             "/bin",
             "--ro-bind-try",
+            "/sbin",
+            "/sbin",
+            "--ro-bind-try",
             "/lib",
             "/lib",
             "--ro-bind-try",
             "/lib64",
             "/lib64",
-            "--dir",
+            "--ro-bind",
             "/etc",
-            "--ro-bind-try",
-            "/etc/ld.so.cache",
-            "/etc/ld.so.cache",
+            "/etc",
             "--proc",
             "/proc",
             "--dev",
             "/dev",
             "--size",
-            str(_MAX_TMP_BYTES),
+            str(_MAX_COMMAND_TMP_BYTES),
             "--tmpfs",
             "/tmp",
-            "--clearenv",
-            "--setenv",
-            "PATH",
-            "/usr/bin:/bin",
-            "--setenv",
-            "HOME",
-            "/tmp",
-            "--setenv",
-            "LANG",
-            "C",
-            "--setenv",
-            "LC_ALL",
-            "C",
-            "--chdir",
-            "/tmp",
-            "--",
-            _PRLIMIT,
-            f"--nproc={_MAX_PROCESSES}:{_MAX_PROCESSES}",
-            f"--cpu={_MAX_CPU_SECONDS}:{_MAX_CPU_SECONDS + 1}",
-            "--fsize=0:0",
-            "--nofile=64:64",
-            f"--as={_MAX_ADDRESS_SPACE_BYTES}:{_MAX_ADDRESS_SPACE_BYTES}",
-            "--",
-            executable,
+            "--tmpfs",
+            "/run",
+            "--tmpfs",
+            "/sys",
         ]
-        command.extend(arguments)
-        return command
+        if not network_access:
+            bwrap_command.insert(5, "--unshare-net")
+
+        for optional_root in (Path("/opt"), Path("/var")):
+            if optional_root.is_dir():
+                bwrap_command.extend(
+                    ["--ro-bind-try", str(optional_root), str(optional_root)]
+                )
+
+        for parent in reversed(root.parents[:-1]):
+            if parent == Path("/"):
+                continue
+            if parent in {
+                Path("/usr"),
+                Path("/bin"),
+                Path("/sbin"),
+                Path("/lib"),
+                Path("/lib64"),
+                Path("/etc"),
+                Path("/proc"),
+                Path("/dev"),
+                Path("/tmp"),
+                Path("/run"),
+                Path("/sys"),
+                Path("/opt"),
+                Path("/var"),
+            }:
+                continue
+            bwrap_command.extend(["--dir", str(parent)])
+        bwrap_command.extend(
+            [
+                "--dir",
+                str(root),
+                "--ro-bind" if not writable else "--bind",
+                str(root),
+                str(root),
+            ]
+        )
+        bwrap_command.extend(cls._secret_mask_arguments(root))
+
+        bwrap_command.extend(
+            [
+                "--clearenv",
+                "--setenv",
+                "PATH",
+                "/usr/bin:/bin:/usr/local/bin:/usr/sbin:/sbin",
+                "--setenv",
+                "HOME",
+                str(root),
+                "--setenv",
+                "LANG",
+                "C",
+                "--setenv",
+                "LC_ALL",
+                "C",
+                "--chdir",
+                str(cwd),
+                "--",
+                _PRLIMIT,
+                f"--nproc={_MAX_PROCESSES}:{_MAX_PROCESSES}",
+                f"--cpu={cpu_seconds}:{cpu_seconds + 1}",
+                f"--fsize={_MAX_COMMAND_FILE_BYTES}:{_MAX_COMMAND_FILE_BYTES}",
+                "--nofile=64:64",
+                f"--as={_MAX_ADDRESS_SPACE_BYTES}:{_MAX_ADDRESS_SPACE_BYTES}",
+                "--",
+                *process_argv,
+            ]
+        )
+        return bwrap_command
+
+    @staticmethod
+    def _secret_mask_arguments(root: Path) -> list[str]:
+        protected_directories: list[Path] = []
+        protected_files: list[Path] = []
+        count = 0
+        for current_root, directory_names, file_names in os.walk(
+            root,
+            topdown=True,
+            followlinks=False,
+        ):
+            current = Path(current_root)
+            retained_directories: list[str] = []
+            for name in directory_names:
+                candidate = current / name
+                relative_parts = candidate.relative_to(root).parts
+                is_secret = (
+                    name.casefold() in _SECRET_DIRECTORY_NAMES
+                    or any(
+                        tuple(part.casefold() for part in relative_parts[-len(suffix):])
+                        == suffix
+                        for suffix in _SECRET_DIRECTORY_SUFFIXES
+                        if len(relative_parts) >= len(suffix)
+                    )
+                )
+                if is_secret:
+                    if candidate.is_symlink():
+                        raise SandboxError("Protected directories cannot be symlinks.")
+                    protected_directories.append(candidate)
+                    count += 1
+                else:
+                    retained_directories.append(name)
+            directory_names[:] = retained_directories
+
+            for name in file_names:
+                lowered = name.casefold()
+                if (
+                    (lowered.startswith(".env") and lowered != ".env.example")
+                    or lowered in _SECRET_FILENAMES
+                    or lowered.endswith(_SECRET_FILE_SUFFIXES)
+                    or any(
+                        marker in lowered
+                        for marker in ("credential", "secret", "token")
+                    )
+                    or (current.name == ".git" and lowered == "config")
+                ):
+                    candidate = current / name
+                    if candidate.is_symlink():
+                        raise SandboxError("Protected files cannot be symlinks.")
+                    if candidate.is_file():
+                        protected_files.append(candidate)
+                        count += 1
+            if count > _SECRET_SCAN_LIMIT:
+                raise SandboxError("Too many protected paths to prepare safely.")
+
+        arguments: list[str] = []
+        for directory in protected_directories:
+            arguments.extend(["--tmpfs", str(directory)])
+        for file_path in protected_files:
+            arguments.extend(["--ro-bind", "/dev/null", str(file_path)])
+        return arguments
 
     def _collect_output(
         self,

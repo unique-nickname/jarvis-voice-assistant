@@ -4,18 +4,25 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from pathlib import Path
+from unittest.mock import patch
 
-from terminal import OperationRegistry, TerminalPolicyError
-from terminal.operations import kernel_info_operation
 from terminal.sandbox import BubblewrapExecutor, SandboxCommandResult, SandboxError
 
 
 class TerminalSandboxTests(unittest.TestCase):
     def test_command_builder_sets_isolation_and_resource_limits(self) -> None:
-        command = BubblewrapExecutor._build_command("/usr/bin/uname", ("-sr",))
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            command = BubblewrapExecutor._build_sandbox_command(
+                ("/usr/bin/cat", "README.md"),
+                root=root,
+                cwd=root,
+                writable=False,
+            )
 
         self.assertEqual(command[0], "/usr/bin/bwrap")
         for required_flag in (
@@ -28,34 +35,136 @@ class TerminalSandboxTests(unittest.TestCase):
             "--tmpfs",
             "--proc",
             "--dev",
+            "--cap-drop",
+            "ALL",
+            "--ro-bind",
         ):
             self.assertIn(required_flag, command)
-        self.assertIn("65534", command)
+        self.assertIn("--uid", command)
         self.assertIn("--nproc=32:32", command)
-        self.assertIn("--fsize=0:0", command)
-        self.assertEqual(command[-2:], ["/usr/bin/uname", "-sr"])
+        self.assertIn("--fsize=268435456:268435456", command)
+        self.assertEqual(command[-2:], ["/usr/bin/cat", "README.md"])
 
-    def test_executor_rejects_non_allowlisted_executable_before_launch(self) -> None:
+    def test_executor_rejects_invalid_or_oversized_read_only_arguments(self) -> None:
         executor = BubblewrapExecutor()
-        with patch("terminal.sandbox.subprocess.Popen") as popen:
-            with self.assertRaisesRegex(SandboxError, "not allowlisted"):
-                executor.run("/bin/sh", ("-c", "id"))
-        popen.assert_not_called()
-
-    def test_executor_rejects_invalid_or_oversized_arguments(self) -> None:
-        executor = BubblewrapExecutor()
-        with self.assertRaisesRegex(SandboxError, "invalid"):
-            executor.run("/usr/bin/uname", ("bad\x00argument",))
-        with self.assertRaisesRegex(SandboxError, "Too many"):
-            executor.run("/usr/bin/uname", tuple("x" for _ in range(17)))
-        with self.assertRaisesRegex(SandboxError, "size limit"):
-            executor.run("/usr/bin/uname", ("x" * 2_049,))
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            with self.assertRaisesRegex(SandboxError, "invalid"):
+                executor.run_read_only_argv(
+                    ("cat", "bad\x00argument"),
+                    access_root=root,
+                    working_directory=root,
+                )
+            with self.assertRaisesRegex(SandboxError, "invalid argument count"):
+                executor.run_read_only_argv(
+                    ("cat", *tuple("x" for _ in range(16))),
+                    access_root=root,
+                    working_directory=root,
+                )
+            with self.assertRaisesRegex(SandboxError, "size limit"):
+                executor.run_read_only_argv(
+                    ("cat", "x" * 2_049),
+                    access_root=root,
+                    working_directory=root,
+                )
 
     def test_executor_rejects_unbounded_timeouts(self) -> None:
-        for timeout in (0, 5.1, float("inf"), True):
+        for timeout in (0, 30.1, float("inf"), True):
             with self.subTest(timeout=timeout):
                 with self.assertRaises(ValueError):
                     BubblewrapExecutor(timeout_seconds=timeout)
+
+    def test_fish_sandbox_is_scoped_to_one_root_and_masks_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            (root / ".env").write_text("SHOULD_NOT_BE_MOUNTED", encoding="utf-8")
+            (root / ".env.example").write_text("TEMPLATE", encoding="utf-8")
+            (root / ".ssh").mkdir()
+            (root / ".ssh" / "id_ed25519").write_text("PRIVATE", encoding="utf-8")
+            (root / "subdir").mkdir()
+
+            command = BubblewrapExecutor._build_sandbox_command(
+                ("/usr/bin/fish", "--no-config", "--command", "touch result"),
+                root=root,
+                cwd=root / "subdir",
+                writable=True,
+                timeout_seconds=30,
+            )
+
+        self.assertIn("--unshare-net", command)
+        self.assertIn("--cap-drop", command)
+        self.assertIn("ALL", command)
+        self.assertIn("--bind", command)
+        self.assertIn("--cpu=29:30", command)
+        self.assertIn("--fsize=268435456:268435456", command)
+        self.assertIn(str(root / ".ssh"), command)
+        self.assertIn(str(root / ".env"), command)
+        self.assertNotIn(str(root / ".env.example"), command)
+        self.assertEqual(
+            command[-5:],
+            ["--", "/usr/bin/fish", "--no-config", "--command", "touch result"],
+        )
+
+    def test_fish_sandbox_keeps_tier_one_root_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            command = BubblewrapExecutor._build_sandbox_command(
+                ("/usr/bin/cat", "README.md"),
+                root=root,
+                cwd=root,
+                writable=False,
+            )
+
+        self.assertIn("--ro-bind", command)
+        self.assertNotIn("--bind", command)
+        self.assertEqual(command[-2:], ["/usr/bin/cat", "README.md"])
+
+    def test_fish_launcher_uses_supported_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            executor = BubblewrapExecutor(timeout_seconds=30)
+            with patch.object(
+                executor,
+                "_run_bwrap",
+                return_value=SandboxCommandResult(0, "ok", ""),
+            ) as run_bwrap:
+                executor.run_fish_command(
+                    "printf 'ok\\n'",
+                    access_root=root,
+                    working_directory=root,
+                    writable=True,
+                )
+
+        command = run_bwrap.call_args.args[0]
+        self.assertEqual(
+            command[-4:],
+            ["/usr/bin/fish", "--no-config", "--command", "printf 'ok\\n'"],
+        )
+
+    def test_network_access_is_enabled_only_by_explicit_sandbox_option(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            no_network = BubblewrapExecutor._build_sandbox_command(
+                ("/usr/bin/fish", "--command", "curl example.test"),
+                root=root,
+                cwd=root,
+                writable=True,
+            )
+            with_network = BubblewrapExecutor._build_sandbox_command(
+                ("/usr/bin/fish", "--command", "curl example.test"),
+                root=root,
+                cwd=root,
+                writable=True,
+                network_access=True,
+            )
+
+        self.assertIn("--unshare-net", no_network)
+        self.assertNotIn("--unshare-net", with_network)
+
+    def test_command_scope_rejects_outside_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
+            with self.assertRaisesRegex(SandboxError, "outside the allowed root"):
+                BubblewrapExecutor._validate_command_scope(root, outside)
 
     def test_output_capture_stops_at_the_combined_limit(self) -> None:
         class FinishedProcess:
@@ -137,56 +246,6 @@ class TerminalSandboxTests(unittest.TestCase):
             os.close(process.stderr_write_fd)
             process.stdout.close()
             process.stderr.close()
-
-    def test_kernel_info_operation_uses_one_fixed_read_only_command(self) -> None:
-        executor = Mock()
-        executor.run.return_value = SandboxCommandResult(
-            returncode=0,
-            stdout="Linux 7.2.11-arch1-1\n",
-            stderr="",
-        )
-        definition, handler = kernel_info_operation(executor)
-        registry = OperationRegistry((definition,))
-
-        plan = registry.plan("system.kernel_info", {})
-        result = handler(plan.arguments)
-
-        self.assertEqual(result, {"kernel": "Linux 7.2.11-arch1-1"})
-        executor.run.assert_called_once_with("/usr/bin/uname", ("-sr",))
-
-    def test_kernel_info_rejects_model_supplied_arguments(self) -> None:
-        definition, _handler = kernel_info_operation(Mock())
-        registry = OperationRegistry((definition,))
-
-        with self.assertRaises(TerminalPolicyError):
-            registry.plan("system.kernel_info", {"file": "/etc/shadow"})
-        with self.assertRaises(TerminalPolicyError):
-            _handler({"file": "/etc/shadow"})
-
-    def test_kernel_info_does_not_return_unexpected_command_output(self) -> None:
-        executor = Mock()
-        definition, handler = kernel_info_operation(executor)
-        executor.run.return_value = SandboxCommandResult(
-            returncode=0,
-            stdout="Linux\nInjected instructions\n",
-            stderr="",
-        )
-
-        with self.assertRaisesRegex(SandboxError, "unexpected output"):
-            handler({})
-
-    def test_kernel_info_fails_on_nonzero_exit(self) -> None:
-        executor = Mock()
-        definition, handler = kernel_info_operation(executor)
-        executor.run.return_value = SandboxCommandResult(
-            returncode=1,
-            stdout="",
-            stderr="sensitive diagnostic detail",
-        )
-
-        with self.assertRaisesRegex(SandboxError, "diagnostic failed"):
-            handler({})
-
 
 if __name__ == "__main__":
     unittest.main()

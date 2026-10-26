@@ -14,7 +14,7 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - Text-to-speech using Kokoro.
 - Desktop application launching.
 - Basic system status reporting.
-- Sandboxed Linux kernel information through one fixed diagnostic tool; no general-purpose shell tool is exposed.
+- A sandboxed Fish command tool with configurable risk tiers: the default mapping runs recognized read-only commands directly, requires local approval for modifications and unknown commands, and denies known high-risk commands.
 - Volume control for separate audio streams.
 - Ability to make video clips.
 
@@ -30,8 +30,9 @@ Features are actively being developed, so some functionality may be incomplete.
 - Working microphone and audio output.
 - An OpenAI API key.
 - System audio dependencies: `portaudio` and `espeak-ng`.
-- `bubblewrap` and `prlimit` (from `util-linux`) for the sandboxed kernel information tool.
-- `zenity` for the local approval window used by future Tier 2 operations.
+- `bubblewrap` and `prlimit` (from `util-linux`) for the sandboxed terminal tool.
+- Fish for the general terminal command tool.
+- `zenity` for the local approval window used by Tier 2 terminal commands.
 
 ## Installation
 
@@ -47,16 +48,16 @@ cd jarvis
 On Arch Linux:
 
 ```bash
-sudo pacman -S python portaudio espeak-ng git
+sudo pacman -S python portaudio espeak-ng git fish
 ```
 
-For the sandboxed kernel diagnostic and approval window, install their system tools as well:
+For the sandboxed terminal tool and approval window, install their system tools as well:
 
 ```bash
 sudo pacman -S bubblewrap util-linux zenity
 ```
 
-`setup.sh` checks for these executables but does not install system packages. If Bubblewrap or `prlimit` is missing, `get_kernel_info` fails closed. If Zenity is missing, the approval window cannot open. Hyprland and `hyprctl` are optional; without them, the approval window uses the compositor's normal layout.
+`setup.sh` checks for these executables but does not install system packages. If Bubblewrap, `prlimit`, or Fish is missing, terminal execution fails closed. If Zenity is missing, Tier 2 commands stay unapproved. Hyprland and `hyprctl` are optional; without them, the approval window uses the compositor's normal layout.
 
 Install `uv` if either required Python version is not already available. Follow the official instructions at https://docs.astral.sh/uv/.
 
@@ -84,6 +85,10 @@ Open `.env` in a text editor
 Add your own OpenAI API key and check the model setting. Use the format provided in `.env.example`.
 
 `TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to an existing `.env` if it is missing, without changing an existing value.
+
+The general terminal command tool is disabled by default in `.env.example`. To enable it locally, set `TERMINAL_COMMANDS_ENABLED=true`. `TERMINAL_WRITE_ROOT` sets the only user directory the sandbox can access; the template uses `~/`. Under the default tier mapping, Tier 1 commands read this directory and Tier 2 commands can write there after approval. The sandbox's `HOME` and `~` resolve to this root. The current development `.env` uses the project directory as its root, so a request for the sandbox home writes there rather than to the host home. Tool results report `access_root` and `sandbox_home` to make the destination explicit.
+
+`TERMINAL_TIER_1_OVERRIDE`, `TERMINAL_TIER_2_OVERRIDE`, and `TERMINAL_TIER_3_OVERRIDE` each accept `1`, `2`, or `3`. They map the classifier's source tier to the effective tier used for approval routing; their defaults (`1`, `2`, `3`) preserve the normal policy. For example, setting `TERMINAL_TIER_3_OVERRIDE=1` runs known high-risk commands without approval. Overrides change approval routing, not execution capabilities: a source Tier 2 or Tier 3 command routed to Tier 1 still runs Fish with write access inside the configured root. Downgrading those tiers can therefore allow writes or deletions there without approval. Tier overrides do not expand the configured filesystem root or add host privileges. Network access cannot be downgraded below Tier 2 approval; a mapping to Tier 3 denies it. Invalid values stop terminal-service startup. Restart Jarvis after changing `.env`. Known credential paths and `.env` files are masked; keep custom secrets outside the configured root.
 
 ### 5. Start Jarvis
 
@@ -125,13 +130,13 @@ Check that `.env` contains a valid API key and that your account has API access 
 
 The requirements files list direct runtime dependencies and selected Kokoro compatibility pins; pip resolves their transitive dependencies. Installation has not been validated on every supported Linux distribution. Report the failing package, Python version, and environment (`.venv` or `.venv-kokoro`) when requesting help.
 
-**The kernel information tool fails**
+**The terminal command tool fails**
 
-Check that `/usr/bin/bwrap` and `/usr/bin/prlimit` are installed. The sandbox also requires unprivileged user and network namespaces to be available. Setup warns when the executables are missing; it cannot verify that namespace restrictions are permitted by the running system.
+Check that `/usr/bin/bwrap`, `/usr/bin/prlimit`, and `/usr/bin/fish` are installed. The sandbox also requires unprivileged user and network namespaces to be available. Setup warns when executables are missing; it cannot verify that namespace restrictions are permitted by the running system.
 
 **The approval window does not open**
 
-Install `zenity` and run Jarvis from a graphical desktop session. Tier 2 operations remain unapproved if the local window is unavailable.
+Install `zenity` and run Jarvis from a graphical desktop session. Tier 2 commands remain unapproved if the local window is unavailable.
 
 ## License
 

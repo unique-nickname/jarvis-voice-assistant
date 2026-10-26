@@ -14,15 +14,41 @@ from tools.memory import MEMORY_TOOLS, create_memory_handlers
 TERMINAL_TOOLS = [
     {
         "type": "function",
-        "name": "get_kernel_info",
+        "name": "run_terminal_command",
         "description": (
-            "Read the Linux kernel name and release using a fixed, sandboxed "
-            "diagnostic. This tool does not read user files or accept commands."
+            "Run one Fish command inside the configured filesystem sandbox. "
+            "Jarvis assigns the risk tier. Recognized read-only commands run "
+            "without a prompt; modifying or unrecognized commands require "
+            "approval in the local window by default. Known high-risk commands "
+            "are denied by default; local tier overrides can change this routing. "
+            "Inside the sandbox, HOME and ~ resolve to the configured terminal "
+            "root, which may differ from the host home directory. This tool "
+            "never elevates privileges."
         ),
         "parameters": {
             "type": "object",
-            "properties": {},
-            "required": [],
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The exact Fish command to run.",
+                },
+                "working_directory": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Directory under the configured terminal root, or null "
+                        "to use the root directory."
+                    ),
+                },
+                "network_access": {
+                    "type": "boolean",
+                    "description": (
+                        "Request network access. Set false unless the command "
+                        "needs it. It cannot bypass Tier 2 approval; a mapping to "
+                        "Tier 3 denies it."
+                    ),
+                },
+            },
+            "required": ["command", "working_directory", "network_access"],
             "additionalProperties": False,
         },
         "strict": True,
@@ -265,8 +291,12 @@ def handlers_for(memory_service=None, terminal_service=None):
         handlers.update(create_memory_handlers(memory_service))
     if terminal_service is not None:
 
-        def get_kernel_info():
-            return terminal_service.execute("system.kernel_info", {}).as_dict()
+        def run_terminal_command(command, working_directory, network_access):
+            return terminal_service.run_command(
+                command,
+                working_directory,
+                network_access,
+            )
 
-        handlers["get_kernel_info"] = get_kernel_info
+        handlers["run_terminal_command"] = run_terminal_command
     return handlers

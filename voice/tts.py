@@ -68,11 +68,6 @@ def speak(text: str):
     except (OSError, RuntimeError, BrokenPipeError) as exc:
         print(f"[TTS error] {exc}")
 
-def speak_async(text: str):
-    thread = threading.Thread(target=speak, args=(text,))
-    thread.daemon = True
-    thread.start()
-
 def shutdown():
     global _worker
 

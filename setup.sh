@@ -31,8 +31,9 @@ check_runtime_executable() {
     fi
 }
 
-check_runtime_executable /usr/bin/bwrap bubblewrap "the sandboxed kernel information tool"
-check_runtime_executable /usr/bin/prlimit util-linux "the sandboxed kernel information tool"
+check_runtime_executable /usr/bin/bwrap bubblewrap "the sandboxed terminal command tool"
+check_runtime_executable /usr/bin/prlimit util-linux "the sandboxed terminal command tool"
+check_runtime_executable /usr/bin/fish fish "the terminal command tool"
 
 if [[ ! -x /usr/bin/zenity && ! -x /bin/zenity ]]; then
     echo "Warning: zenity is missing; the local approval window will be unavailable."
@@ -146,6 +147,11 @@ elif [[ -f .env.example ]]; then
     # Add missing optional settings without changing existing values.
     for key in \
         TERMINAL_APPROVAL_FLOATING \
+        TERMINAL_COMMANDS_ENABLED \
+        TERMINAL_WRITE_ROOT \
+        TERMINAL_TIER_1_OVERRIDE \
+        TERMINAL_TIER_2_OVERRIDE \
+        TERMINAL_TIER_3_OVERRIDE \
         CLIP_MONITOR \
         CLIP_DURATION \
         CLIP_FPS \

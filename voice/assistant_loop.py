@@ -5,7 +5,7 @@ load_dotenv()
 
 from core.assistant import ask
 from voice.stt import record_audio, transcribe
-from voice.tts import initialize, speak, speak_async, shutdown
+from voice.tts import initialize, speak, shutdown
 from voice.wake_word import wait_for_wake_word
 from voice.clip_recorder import ClipRecorder
 from memory import MemoryService

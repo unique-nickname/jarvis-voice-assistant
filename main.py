@@ -7,23 +7,28 @@ from core.assistant import ask
 from memory import MemoryService
 from terminal.operations import create_terminal_service
 from tools.registry import handlers_for, tools_for
+from tools.scheduled_actions import ScheduledActionService
 from tools.timers import TimerService
 
 
 def main():
     memory_service = MemoryService()
     timer_service = TimerService()
+    scheduled_action_service = None
     try:
         terminal_service = create_terminal_service()
+        scheduled_action_service = ScheduledActionService()
         assistant_tools = tools_for(
             memory_service,
             terminal_service,
             timer_service,
+            scheduled_action_service,
         )
         tool_handlers = handlers_for(
             memory_service,
             terminal_service,
             timer_service,
+            scheduled_action_service,
         )
         print("Jarvis initialized. Type 'exit' to quit.")
 
@@ -50,9 +55,13 @@ def main():
         print("\nJarvis shutting down.")
     finally:
         try:
-            timer_service.close()
+            if scheduled_action_service is not None:
+                scheduled_action_service.close()
         finally:
-            memory_service.close()
+            try:
+                timer_service.close()
+            finally:
+                memory_service.close()
 
 
 if __name__ == "__main__":

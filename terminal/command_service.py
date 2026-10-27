@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -53,6 +54,7 @@ class CommandTerminalService(TerminalService):
             self._validate_tier_overrides(tier_overrides)
         )
         self._executor = executor or BubblewrapExecutor(timeout_seconds=30)
+        self._command_lock = threading.Lock()
 
         read_definition = OperationDefinition(
             operation_id=_READ_OPERATION_ID,
@@ -80,14 +82,25 @@ class CommandTerminalService(TerminalService):
         network_access: bool = False,
     ) -> dict[str, Any]:
         """Apply local tier policy, requesting approval for every Tier 2 plan."""
+        with self._command_lock:
+            return self._run_command_serialized(
+                command,
+                working_directory,
+                network_access,
+            )
+
+    def _run_command_serialized(
+        self,
+        command: str,
+        working_directory: str | None,
+        network_access: bool,
+    ) -> dict[str, Any]:
         try:
-            assessment = assess_command(command)
-            if type(network_access) is not bool:
-                raise TerminalPolicyError("Network access must be true or false.")
-            assessment = self._promote_network_request(assessment, network_access)
-            source_tier = assessment.risk_tier
-            effective_tier = self._effective_tier(source_tier, network_access)
-            cwd = self._resolve_working_directory(working_directory)
+            assessment, source_tier, effective_tier, cwd = self._assess_request(
+                command,
+                working_directory,
+                network_access,
+            )
         except (TerminalPolicyError, SandboxError, ValueError) as exc:
             return {
                 "operation_id": "terminal.command",
@@ -129,6 +142,56 @@ class CommandTerminalService(TerminalService):
                 detail="command_exit_nonzero",
             )
         return execution.as_dict()
+
+    def preview_command(
+        self,
+        command: str,
+        working_directory: str | None = None,
+        network_access: bool = False,
+    ) -> dict[str, Any]:
+        """Classify and scope a command without executing or approving it."""
+        try:
+            _, source_tier, effective_tier, cwd = self._assess_request(
+                command,
+                working_directory,
+                network_access,
+            )
+        except (TerminalPolicyError, SandboxError, ValueError) as exc:
+            return {
+                "status": ExecutionStatus.FAILED.value,
+                "detail": str(exc),
+            }
+
+        if effective_tier is RiskTier.HIGH_RISK:
+            return {
+                "status": ExecutionStatus.DENIED.value,
+                "detail": "tier_3_denied_by_default",
+                "source_tier": int(source_tier),
+                "effective_tier": int(effective_tier),
+                "working_directory": str(cwd),
+            }
+
+        return {
+            "status": "ready",
+            "source_tier": int(source_tier),
+            "effective_tier": int(effective_tier),
+            "working_directory": str(cwd),
+        }
+
+    def _assess_request(
+        self,
+        command: str,
+        working_directory: str | None,
+        network_access: bool,
+    ) -> tuple[CommandAssessment, RiskTier, RiskTier, Path]:
+        assessment = assess_command(command)
+        if type(network_access) is not bool:
+            raise TerminalPolicyError("Network access must be true or false.")
+        assessment = self._promote_network_request(assessment, network_access)
+        source_tier = assessment.risk_tier
+        effective_tier = self._effective_tier(source_tier, network_access)
+        cwd = self._resolve_working_directory(working_directory)
+        return assessment, source_tier, effective_tier, cwd
 
     def _resolve_working_directory(self, requested: str | None) -> Path:
         if requested is None or requested == "":

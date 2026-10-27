@@ -16,6 +16,7 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - System status reporting, including disk and OS details.
 - Bounded filename search and opening supported files under the home folder.
 - One-shot desktop timers while Jarvis is running.
+- Delayed scheduling for selected desktop actions and generated terminal commands.
 - Audio output listing and selection.
 - A sandboxed Fish command tool with configurable risk tiers: the default mapping runs recognized read-only commands directly, requires local approval for modifications and unknown commands, and denies known high-risk commands.
 - Volume control for separate audio streams.
@@ -118,6 +119,18 @@ File search returns filenames only, skips hidden folders, and stays under the
 home directory. File opening is limited to supported document and media types.
 Timers use desktop notifications, remain in memory only, and are cancelled
 when Jarvis shuts down.
+
+Delayed actions use a separate in-memory queue (up to 20 pending or running
+actions, with a maximum delay of 30 days). The queue executes one action at a
+time, so a Tier 2 approval prompt can hold later due actions until it is
+approved, denied, or closed. Jarvis can queue selected
+purpose-built actions or a command it generated for the specific request. The
+application checks scheduled terminal commands when they are queued and again
+when they are due. Tier 2 still opens the local approval window at execution
+time; scheduling never counts as approval. Tier 3 follows the configured
+terminal policy. Pending actions can be listed or cancelled, and every pending
+action is cancelled when Jarvis shuts down; the queue does not persist across
+restarts.
 
 After a response, Jarvis listens for a follow-up only when it has a meaningful
 question or needs your answer to continue the current interaction. It does not

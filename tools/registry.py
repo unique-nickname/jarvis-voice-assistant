@@ -11,6 +11,10 @@ from tools.desktop import (
 from tools.audio_outputs import list_audio_outputs, set_audio_output
 from tools.file_actions import open_file, search_files
 from tools.memory import MEMORY_TOOLS, create_memory_handlers
+from tools.scheduled_actions import (
+    SCHEDULED_TERMINAL_ACTION_TOOLS,
+    SCHEDULED_TOOL_ACTION_TOOLS,
+)
 from tools.windows import focus_window, list_open_windows
 
 
@@ -459,7 +463,12 @@ TOOL_HANDLERS = {
 }
 
 
-def tools_for(memory_service=None, terminal_service=None, timer_service=None):
+def tools_for(
+    memory_service=None,
+    terminal_service=None,
+    timer_service=None,
+    scheduled_action_service=None,
+):
     """Return the tool schemas available to an assistant request."""
     available_tools = TOOLS
     if memory_service is not None:
@@ -468,10 +477,19 @@ def tools_for(memory_service=None, terminal_service=None, timer_service=None):
         available_tools = [*available_tools, *TERMINAL_TOOLS]
     if timer_service is not None:
         available_tools = [*available_tools, *TIMER_TOOLS]
+    if scheduled_action_service is not None:
+        available_tools = [*available_tools, *SCHEDULED_TOOL_ACTION_TOOLS]
+        if terminal_service is not None:
+            available_tools = [*available_tools, *SCHEDULED_TERMINAL_ACTION_TOOLS]
     return available_tools
 
 
-def handlers_for(memory_service=None, terminal_service=None, timer_service=None):
+def handlers_for(
+    memory_service=None,
+    terminal_service=None,
+    timer_service=None,
+    scheduled_action_service=None,
+):
     """Return static handlers plus those bound to active services."""
     handlers = dict(TOOL_HANDLERS)
     if memory_service is not None:
@@ -492,4 +510,15 @@ def handlers_for(memory_service=None, terminal_service=None, timer_service=None)
             "list_timers": timer_service.list_timers,
             "cancel_timer": timer_service.cancel_timer,
         })
+    if scheduled_action_service is not None:
+        scheduled_action_service.bind(handlers, TOOLS, terminal_service)
+        handlers.update({
+            "queue_tool_action": scheduled_action_service.queue_tool_action,
+            "list_scheduled_actions": scheduled_action_service.list_scheduled_actions,
+            "cancel_scheduled_action": scheduled_action_service.cancel_scheduled_action,
+        })
+        if terminal_service is not None:
+            handlers["queue_terminal_command"] = (
+                scheduled_action_service.queue_terminal_command
+            )
     return handlers

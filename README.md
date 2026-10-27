@@ -171,6 +171,47 @@ This starts Jarvis automatically with the main window hidden. Click the
 indicator to show the launcher, or right-click it for Settings and Stop Jarvis.
 Press `Ctrl+C` in the launching terminal to stop the indicator and assistant.
 
+#### Waybar status module
+
+Jarvis can publish its current state for a Waybar custom module. Use headless
+mode so the floating Tk indicator is not shown:
+
+```bash
+./jarvis --headless
+```
+
+Add a module like this to Waybar's JSONC configuration, replacing the path
+with the absolute path to this checkout:
+
+```jsonc
+"custom/jarvis": {
+    "exec": "/absolute/path/to/jarvis/jarvis --waybar-status",
+    "return-type": "json",
+    "interval": 1,
+    "format": "{text}",
+    "tooltip": true
+}
+```
+
+Add matching state colors to Waybar's stylesheet:
+
+```css
+#custom-jarvis { padding: 0 8px; color: #858b98; }
+#custom-jarvis.wake_word,
+#custom-jarvis.listening_command,
+#custom-jarvis.follow_up { color: #44c7d9; }
+#custom-jarvis.thinking { color: #a978ef; }
+#custom-jarvis.executing { color: #ed9b48; }
+#custom-jarvis.waiting_approval,
+#custom-jarvis.error { color: #ff5252; }
+#custom-jarvis.speaking { color: #61c784; }
+```
+
+The module reads a private status file under `~/.local/state/jarvis`; it only
+reports status and does not start or stop Jarvis. The tooltip names the current
+state, and stale activity records from an exited assistant appear as stopped.
+A fatal error remains visible as **Attention needed** until the next run.
+
 To stop other Jarvis processes from this checkout before starting a new
 instance, add `--kill-existing`. It can be combined with `--headless` or
 `--indicator-only`:

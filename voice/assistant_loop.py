@@ -66,11 +66,11 @@ def normalize_voice_command(text: str) -> str:
 
 
 def main():
-    emit_runtime_status("starting")
+    emit_runtime_status("starting", persist=False)
     try:
         instance_lock = JarvisInstanceLock.acquire()
     except JarvisAlreadyRunningError as exc:
-        emit_runtime_status("already_running")
+        emit_runtime_status("already_running", persist=False)
         print(str(exc))
         return
 

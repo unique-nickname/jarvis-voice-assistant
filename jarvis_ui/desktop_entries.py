@@ -12,8 +12,14 @@ from core.config import PROJECT_ROOT
 
 
 MANAGED_MARKER = "X-Jarvis-Managed=desktop-entry-v1"
+ICON_MARKER = "X-Jarvis-Managed=desktop-icon-v1"
+THEME_MARKER = "X-Jarvis-Managed=hicolor-index-v1"
 APPLICATION_DIRECTORY = "applications"
-APPLICATION_ICON = PROJECT_ROOT / "icon.jpg"
+APPLICATION_ICON = PROJECT_ROOT / "icon.png"
+APPLICATION_ICON_NAME = "jarvis"
+ICON_RELATIVE_PATH = Path("icons/hicolor/256x256/apps/jarvis.png")
+ICON_MARKER_NAME = "jarvis.png.jarvis-managed"
+THEME_INDEX_RELATIVE_PATH = Path("icons/hicolor/index.theme")
 
 
 @dataclass(frozen=True)
@@ -76,7 +82,7 @@ ENTRIES = (
 )
 
 
-def _applications_directory() -> Path:
+def _data_home() -> Path:
     configured = os.environ.get("XDG_DATA_HOME", "").strip()
     data_home = (
         Path(configured).expanduser()
@@ -85,7 +91,11 @@ def _applications_directory() -> Path:
     )
     if not data_home.is_absolute():
         data_home = Path.home() / ".local/share"
-    return data_home / APPLICATION_DIRECTORY
+    return data_home
+
+
+def _applications_directory() -> Path:
+    return _data_home() / APPLICATION_DIRECTORY
 
 
 def _escape_desktop_value(value: str) -> str:
@@ -126,7 +136,7 @@ def _render_entry(entry: DesktopEntry) -> str:
         "Type=Application",
         f"Name={_escape_desktop_value(entry.name)}",
         f"Comment={_escape_desktop_value(entry.comment)}",
-        f"Icon={_escape_desktop_value(str(APPLICATION_ICON))}",
+        f"Icon={APPLICATION_ICON_NAME}",
         f"Exec={command}",
         f"Path={_escape_desktop_value(str(PROJECT_ROOT))}",
         "Terminal=false",
@@ -159,8 +169,79 @@ def _atomic_write(path: Path, contents: str) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
+def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(contents)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.chmod(temporary_path, 0o644)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def _is_managed(contents: str) -> bool:
-    return any(line.strip() == MANAGED_MARKER for line in contents.splitlines())
+    return _has_marker(contents, MANAGED_MARKER)
+
+
+def _has_marker(contents: str, marker: str) -> bool:
+    return any(line.strip() == marker for line in contents.splitlines())
+
+
+def _has_icon_directory(contents: str) -> bool:
+    for line in contents.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "Directories":
+            return "256x256/apps" in {
+                part.strip() for part in value.split(",")
+            }
+    return False
+
+
+def _system_theme_index_contents() -> str:
+    configured = os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
+    for directory in configured.split(":"):
+        if not directory:
+            continue
+        candidate = Path(directory).expanduser() / "icons/hicolor/index.theme"
+        try:
+            contents = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if _has_icon_directory(contents):
+            return f"# {THEME_MARKER}\n{contents.lstrip()}"
+    raise SystemExit(
+        "Could not find a system hicolor index.theme with a 256x256/apps "
+        "directory; refusing to create an incomplete user icon theme."
+    )
+
+
+def _check_theme_index(path: Path) -> tuple[bool, str | None]:
+    """Return whether an index should be written and the safe contents."""
+    if not path.exists():
+        return True, _system_theme_index_contents()
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise SystemExit(f"Cannot inspect icon theme index {path}: {exc}") from None
+    if _has_marker(contents, THEME_MARKER):
+        return True, contents
+    if _has_icon_directory(contents):
+        return False, None
+    raise SystemExit(
+        "The existing hicolor icon theme index does not include 256x256/apps; "
+        f"refusing to change it: {path}"
+    )
 
 
 def install_entries() -> int:
@@ -174,8 +255,39 @@ def install_entries() -> int:
         )
     if not APPLICATION_ICON.is_file():
         raise SystemExit(f"Jarvis application icon is missing: {APPLICATION_ICON}")
+    if APPLICATION_ICON.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(
+            f"Jarvis application icon is not a PNG file: {APPLICATION_ICON}"
+        )
 
+    data_home = _data_home()
     directory = _applications_directory()
+    icon_target = data_home / ICON_RELATIVE_PATH
+    icon_marker = icon_target.with_name(ICON_MARKER_NAME)
+    theme_index = data_home / THEME_INDEX_RELATIVE_PATH
+    create_theme_index, theme_index_contents = _check_theme_index(theme_index)
+
+    if icon_target.exists():
+        try:
+            marker_contents = icon_marker.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(
+                f"Refusing to replace an unmanaged Jarvis icon {icon_target}: {exc}"
+            ) from None
+        if marker_contents.strip() != ICON_MARKER:
+            raise SystemExit(f"Refusing to replace an unmanaged icon: {icon_target}")
+    elif icon_marker.exists():
+        try:
+            marker_contents = icon_marker.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(
+                f"Cannot inspect icon marker {icon_marker}: {exc}"
+            ) from None
+        if marker_contents.strip() != ICON_MARKER:
+            raise SystemExit(
+                f"Refusing to replace an unmanaged icon marker: {icon_marker}"
+            )
+
     targets = [directory / entry.filename for entry in ENTRIES]
     for target in targets:
         if target.exists():
@@ -192,17 +304,29 @@ def install_entries() -> int:
 
     try:
         directory.mkdir(parents=True, exist_ok=True)
+        icon_target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(icon_marker, f"{ICON_MARKER}\n")
+        _atomic_write_bytes(icon_target, APPLICATION_ICON.read_bytes())
+        if create_theme_index and theme_index_contents is not None:
+            _atomic_write(theme_index, theme_index_contents)
         for entry, target in zip(ENTRIES, targets, strict=True):
             _atomic_write(target, _render_entry(entry))
     except OSError as exc:
         raise SystemExit(f"Could not install Jarvis desktop entries: {exc}") from None
-    print(f"Installed {len(ENTRIES)} Jarvis desktop entries in {directory}.")
+    print(
+        f"Installed {len(ENTRIES)} Jarvis desktop entries in {directory} "
+        f"and icon {icon_target}."
+    )
     print("Hyprlauncher can find them with its desktop finder.")
     return 0
 
 
 def uninstall_entries() -> int:
     directory = _applications_directory()
+    data_home = _data_home()
+    icon_target = data_home / ICON_RELATIVE_PATH
+    icon_marker = icon_target.with_name(ICON_MARKER_NAME)
+    theme_index = data_home / THEME_INDEX_RELATIVE_PATH
     targets = [directory / entry.filename for entry in ENTRIES]
     existing_targets = [target for target in targets if target.exists()]
     for target in existing_targets:
@@ -214,9 +338,36 @@ def uninstall_entries() -> int:
             raise SystemExit(
                 f"Refusing to remove an unmanaged desktop entry: {target}"
             )
+    remove_icon = False
+    if icon_marker.exists():
+        try:
+            marker_contents = icon_marker.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(
+                f"Cannot inspect icon marker {icon_marker}: {exc}"
+            ) from None
+        if marker_contents.strip() != ICON_MARKER:
+            raise SystemExit(
+                f"Refusing to remove an unmanaged icon marker: {icon_marker}"
+            )
+        remove_icon = True
+    remove_theme_index = False
+    if theme_index.exists():
+        try:
+            index_contents = theme_index.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise SystemExit(
+                f"Cannot inspect icon theme index {theme_index}: {exc}"
+            ) from None
+        remove_theme_index = _has_marker(index_contents, THEME_MARKER)
     try:
         for target in existing_targets:
             target.unlink()
+        if remove_icon:
+            icon_target.unlink(missing_ok=True)
+            icon_marker.unlink()
+        if remove_theme_index:
+            theme_index.unlink()
     except OSError as exc:
         raise SystemExit(f"Could not remove Jarvis desktop entries: {exc}") from None
     removed = len(existing_targets)

@@ -235,12 +235,15 @@ headless entry runs without a terminal window; choose **Jarvis (Stop)** in
 Hyprlauncher to stop it. Restart entries stop existing Jarvis processes from
 this checkout before starting the selected mode. The Waybar status query is
 intentionally not an application entry because Waybar runs it as a polling
-command. All entries use the project `icon.jpg`.
+command. All entries use the project `icon.png`; the installer registers it as
+the `jarvis` icon in the user's hicolor theme so Hyprlauncher can resolve it.
+If the user hicolor theme has no index file, the installer adds a marked copy
+of the system hicolor index so its icon directories remain discoverable.
 
 Entries are written under `$XDG_DATA_HOME/applications`, or
 `~/.local/share/applications` if `XDG_DATA_HOME` is unset or relative. They
-point to this checkout and its icon, so run the installer again if you move
-the project.
+point to this checkout, so run the installer again if you move the project.
+Restart Hyprlauncher after installing to refresh its icon-theme lookup.
 Remove the entries with:
 
 ```bash

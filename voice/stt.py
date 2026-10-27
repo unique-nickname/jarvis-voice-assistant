@@ -14,14 +14,12 @@ MIN_SPEECH_FRAMES = 1
 
 MODEL_SIZE = "base"
 
-print("Loading Whisper model...")
 model = WhisperModel(
     MODEL_SIZE,
     device="cpu",
     compute_type="int8",
 )
 vad = webrtcvad.Vad(2)
-print("Whisper model ready.")
 
 
 def record_audio(

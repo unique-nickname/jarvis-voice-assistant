@@ -1,6 +1,35 @@
 
 import json
+import logging
 import sys
+import warnings
+
+# These are known startup notices from the pinned Kokoro/PyTorch stack. Keep
+# filtering narrow and local to this worker so unrelated warnings remain visible.
+warnings.filterwarnings(
+    "ignore",
+    message="^Can't initialize NVML$",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="^dropout option adds dropout after all but last recurrent layer.*",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="^`torch\\.nn\\.utils\\.weight_norm` is deprecated.*",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="^`torch\\.jit\\.script` is deprecated.*",
+    category=FutureWarning,
+)
+
+# HF_TOKEN is optional for this public model. Hide only Hub warning-level
+# notices; errors and download failures remain visible to the worker protocol.
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 import numpy as np
 import sounddevice as sd
@@ -16,12 +45,9 @@ def send(message):
 
 
 try:
-    print("Loading Kokoro...", file=sys.stderr, flush=True)
-    pipeline = KPipeline(lang_code="b")
+    pipeline = KPipeline(lang_code="b", repo_id="hexgrad/Kokoro-82M")
 
     # Warm up the selected voice and trigger any first-use downloads.
-    print("Preparing Jarvis voice...", file=sys.stderr, flush=True)
-
     for _, _, audio in pipeline(
         "System online.",
         voice=VOICE,
@@ -29,7 +55,6 @@ try:
     ):
         pass
 
-    print("Kokoro ready.", file=sys.stderr, flush=True)
     send({"ready": True})
 except Exception as exc:
     send({"ready": False, "error": str(exc)})

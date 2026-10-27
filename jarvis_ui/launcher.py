@@ -919,18 +919,38 @@ def main() -> None:
         action="store_true",
         help="print the current runtime state as Waybar custom-module JSON",
     )
+    modes.add_argument(
+        "--stop",
+        action="store_true",
+        help="stop other Jarvis processes from this checkout and exit",
+    )
     parser.add_argument(
         "--kill-existing",
         action="store_true",
         help="stop other Jarvis processes from this checkout before launching",
     )
     arguments = parser.parse_args()
+    if arguments.stop and arguments.kill_existing:
+        parser.error("--stop cannot be combined with --kill-existing")
     if arguments.waybar_status:
         if arguments.kill_existing:
             parser.error("--waybar-status cannot be combined with --kill-existing")
         from jarvis_ui.waybar_status import main as waybar_status_main
 
         waybar_status_main()
+        return
+    if arguments.stop:
+        stopped_count, survivors = stop_existing_jarvis_processes()
+        if stopped_count:
+            print(f"Stopped {stopped_count} existing Jarvis process(es).")
+        else:
+            print("No other Jarvis processes from this checkout are running.")
+        if survivors:
+            listed_pids = ", ".join(str(pid) for pid in survivors)
+            raise SystemExit(
+                "Could not stop all existing Jarvis processes; still running: "
+                f"{listed_pids}"
+            )
         return
     if arguments.kill_existing:
         stopped_count, survivors = stop_existing_jarvis_processes()

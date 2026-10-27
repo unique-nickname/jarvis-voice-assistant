@@ -220,6 +220,37 @@ instance, add `--kill-existing`. It can be combined with `--headless` or
 ./jarvis --kill-existing
 ```
 
+#### Hyprlauncher and desktop application entries
+
+Hyprlauncher can launch Jarvis through its desktop finder. After running
+`./setup.sh`, install per-user entries with:
+
+```bash
+.venv/bin/python -m jarvis_ui.desktop_entries install
+```
+
+The entries include the normal launcher, headless mode, indicator-only mode,
+Stop, direct Settings, and restart variants for the three launch modes. The
+headless entry runs without a terminal window; choose **Jarvis (Stop)** in
+Hyprlauncher to stop it. Restart entries stop existing Jarvis processes from
+this checkout before starting the selected mode. The Waybar status query is
+intentionally not an application entry because Waybar runs it as a polling
+command.
+
+Entries are written under `$XDG_DATA_HOME/applications`, or
+`~/.local/share/applications` if `XDG_DATA_HOME` is unset or relative. They
+point to this checkout, so run the installer again if you move the project.
+Remove the entries with:
+
+```bash
+.venv/bin/python -m jarvis_ui.desktop_entries uninstall
+```
+
+The installer only replaces or removes desktop files carrying its Jarvis
+ownership marker. Hyprlauncher uses desktop entries when its desktop finder is
+selected (the desktop finder is the documented default); see the
+[Hyprland Hyprlauncher documentation](https://wiki.hypr.land/Hypr-Ecosystem/hyprlauncher/).
+
 You can also open the settings window directly with
 `.venv/bin/python -m jarvis_ui.settings`.
 

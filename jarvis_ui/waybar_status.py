@@ -23,11 +23,27 @@ STATE_LABELS = {
     "stopping": "Stopping",
 }
 
+STATE_TEXT = {
+    "starting": "Starting",
+    "wake_word": "Wake word",
+    "listening_command": "Listening",
+    "thinking": "Thinking",
+    "executing": "Executing",
+    "waiting_approval": "Approval needed",
+    "speaking": "Speaking",
+    "follow_up": "Follow-up",
+    "error": "Attention needed",
+    "stopped": "Stopped",
+    "already_running": "Already running",
+    "stopping": "Stopping",
+}
+
 
 def waybar_payload() -> dict[str, str]:
     state = read_runtime_status()
+    label = STATE_TEXT.get(state, "Stopped")
     return {
-        "text": "●",
+        "text": f"● {label}",
         "tooltip": f"Jarvis · {STATE_LABELS.get(state, 'Stopped')}",
         "class": state,
         "alt": state,

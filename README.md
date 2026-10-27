@@ -207,10 +207,13 @@ Add matching state colors to Waybar's stylesheet:
 #custom-jarvis.speaking { color: #61c784; }
 ```
 
-The module reads a private status file under `~/.local/state/jarvis`; it only
-reports status and does not start or stop Jarvis. The tooltip names the current
-state, and stale activity records from an exited assistant appear as stopped.
-A fatal error remains visible as **Attention needed** until the next run.
+The module displays a colored dot followed by a short state label, such as
+**● Listening** or **● Approval needed**. The state class remains available for
+CSS coloring, and the tooltip gives a longer description. It reads a private
+status file under `~/.local/state/jarvis`; it only reports status and does not
+start or stop Jarvis. Stale activity records from an exited assistant appear
+as stopped. A fatal error remains visible as **Attention needed** until the next
+run.
 
 To stop other Jarvis processes from this checkout before starting a new
 instance, add `--kill-existing`. It can be combined with `--headless` or

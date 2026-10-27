@@ -495,10 +495,13 @@ class ScheduledActionService:
             return "That read-only action cannot be queued as a delayed action."
 
         if tool_name == "open_application":
-            from tools.desktop import ALLOWED_APPLICATIONS
+            from tools.desktop import get_allowed_applications
 
             name = arguments.get("name")
-            if not isinstance(name, str) or name.strip().casefold() not in ALLOWED_APPLICATIONS:
+            if (
+                not isinstance(name, str)
+                or name.strip().casefold() not in get_allowed_applications()
+            ):
                 return "Only allowlisted applications can be scheduled."
 
         return None

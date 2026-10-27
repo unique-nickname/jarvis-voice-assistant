@@ -61,21 +61,27 @@ except Exception as exc:
     sys.exit(1)
 
 
-for line in sys.stdin:
+try:
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            text = request.get("text", "")
+
+            if text.strip():
+                chunks = pipeline(text, voice=VOICE, speed=SPEED)
+                audio_chunks = [audio for _, _, audio in chunks]
+
+                if audio_chunks:
+                    audio = np.concatenate(audio_chunks)
+                    sd.play(audio, SAMPLE_RATE)
+                    sd.wait()
+
+            send({"ok": True})
+
+        except Exception as exc:
+            send({"ok": False, "error": str(exc)})
+except KeyboardInterrupt:
     try:
-        request = json.loads(line)
-        text = request.get("text", "")
-
-        if text.strip():
-            chunks = pipeline(text, voice=VOICE, speed=SPEED)
-            audio_chunks = [audio for _, _, audio in chunks]
-
-            if audio_chunks:
-                audio = np.concatenate(audio_chunks)
-                sd.play(audio, SAMPLE_RATE)
-                sd.wait()
-
-        send({"ok": True})
-
-    except Exception as exc:
-        send({"ok": False, "error": str(exc)})
+        sd.stop()
+    except Exception:
+        pass

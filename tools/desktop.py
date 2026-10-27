@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import shutil
@@ -5,9 +6,9 @@ import signal
 import socket
 import subprocess
 
-# Friendly names mapped to executable commands.
-# Add or remove entries to match your installed applications.
-ALLOWED_APPLICATIONS = {
+# Friendly names mapped to executable names. This is the safe fallback when
+# the user has not saved a custom allowlist in their local configuration.
+DEFAULT_ALLOWED_APPLICATIONS = {
     "zen": "zen-browser",
     "zen browser": "zen-browser",
     "browser": "zen-browser",
@@ -17,6 +18,71 @@ ALLOWED_APPLICATIONS = {
     "discord": "vesktop",
     "code editor": "code",
 }
+ALLOWED_APPLICATIONS = DEFAULT_ALLOWED_APPLICATIONS
+APPLICATION_ALLOWLIST_ENV = "JARVIS_APPLICATION_ALLOWLIST"
+MAX_APPLICATION_ALLOWLIST_ENTRIES = 100
+
+
+def validate_application_allowlist(value: object) -> dict[str, str]:
+    """Validate friendly-name to single-executable mappings from local config."""
+    if not isinstance(value, dict):
+        raise ValueError("Application allowlist must be a JSON object.")
+    if len(value) > MAX_APPLICATION_ALLOWLIST_ENTRIES:
+        raise ValueError(
+            f"Application allowlist cannot exceed "
+            f"{MAX_APPLICATION_ALLOWLIST_ENTRIES} entries."
+        )
+
+    validated: dict[str, str] = {}
+    for raw_name, raw_executable in value.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_executable, str):
+            raise ValueError("Each application entry needs a name and executable.")
+        name = raw_name.strip().casefold()
+        executable = raw_executable.strip()
+        if (
+            not name
+            or len(name) > 100
+            or "=" in name
+            or any(ord(character) < 32 for character in name)
+        ):
+            raise ValueError(
+                "Application names must be 1–100 characters and cannot contain '=' or control characters."
+            )
+        if (
+            not executable
+            or len(executable) > 4096
+            or any(ord(character) < 32 for character in executable)
+        ):
+            raise ValueError("Each application entry needs one executable path or name.")
+        if "/" in executable and not os.path.isabs(executable):
+            raise ValueError(
+                f"Executable path for '{name}' must be absolute when it contains '/'."
+            )
+        if name in validated:
+            raise ValueError(f"Application name '{name}' appears more than once.")
+        validated[name] = executable
+    return validated
+
+
+def parse_application_allowlist(raw_value: str) -> dict[str, str]:
+    """Parse and validate the JSON allowlist stored in the local config."""
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Application allowlist must contain valid JSON.") from exc
+    return validate_application_allowlist(value)
+
+
+def get_allowed_applications() -> dict[str, str]:
+    """Return the user's allowlist, or built-in defaults when unset."""
+    raw_value = os.environ.get(APPLICATION_ALLOWLIST_ENV)
+    if raw_value is None:
+        return dict(DEFAULT_ALLOWED_APPLICATIONS)
+    try:
+        return parse_application_allowlist(raw_value)
+    except ValueError:
+        # Fail closed if hand-edited configuration is malformed.
+        return {}
 
 
 def control_volume(
@@ -390,16 +456,19 @@ def control_media(
 
 def open_application(name: str) -> dict:
     """Launch an approved desktop application."""
-    name = name.strip().lower()
+    if not isinstance(name, str):
+        return {"success": False, "message": "Application name must be text."}
+    name = name.strip().casefold()
 
-    executable = ALLOWED_APPLICATIONS.get(name)
+    allowed_applications = get_allowed_applications()
+    executable = allowed_applications.get(name)
     if executable is None:
         return {
             "success": False,
             "message": (
                 f"'{name}' is not an approved application. "
                 f"Available applications: "
-                f"{', '.join(ALLOWED_APPLICATIONS)}"
+                f"{', '.join(allowed_applications)}"
             ),
         }
 

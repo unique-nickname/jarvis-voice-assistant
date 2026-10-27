@@ -21,6 +21,7 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - A sandboxed Fish command tool with configurable risk tiers: the default mapping runs recognized read-only commands directly, requires local approval for modifications and unknown commands, and denies known high-risk commands.
 - Volume control for separate audio streams.
 - Ability to make video clips.
+- A desktop launcher with a floating status indicator and a local settings window.
 
 Features are actively being developed, so some functionality may be incomplete.
 
@@ -57,7 +58,7 @@ cd jarvis
 On Arch Linux:
 
 ```bash
-sudo pacman -S python portaudio espeak-ng git fish
+sudo pacman -S python portaudio espeak-ng git fish tk
 ```
 
 For the sandboxed terminal tool and approval window, install their system tools as well:
@@ -84,20 +85,36 @@ The script creates or reuses two virtual environments:
 - `.venv/`: Main application, using Python 3.14.
 - `.venv-kokoro/`: Kokoro text-to-speech worker, using Python 3.12.
 
-It installs dependencies from `requirements.txt` and `requirements-kokoro.txt`, creates `.env` from `.env.example` if needed, and checks for the required wake-word models.
+It installs dependencies from `requirements.txt` and `requirements-kokoro.txt`, creates the selected config file from `.env.example` if needed, and checks for the required wake-word models.
 
 Existing environments and an existing `.env` file are preserved. If setup reports an environment version mismatch, replace that environment with the required Python version before rerunning setup.
 
+The desktop launcher and settings window use Tkinter from the main Python
+environment; `setup.sh` checks whether it is available. The voice assistant can
+still run directly from the terminal if the selected Python build has no
+Tkinter support.
+
 ### 4. Configure your API key
 
-Open `.env` in a text editor
-Add your own OpenAI API key and check the model setting. Use the format provided in `.env.example`.
+Run `./jarvis` to open the desktop launcher, then choose **Settings** to enter
+your OpenAI API key and adjust supported options. The API key field is masked;
+leaving it blank preserves the saved key, and a separate checkbox clears it.
+The settings window keeps unrelated lines in the config file, saves it with
+user-only file permissions, and applies changes the next time Jarvis starts.
+The **Applications** tab edits the friendly names and single executable paths
+that the `open_application` tool may launch. It does not accept shell commands
+or executable arguments. The **General** tab selects the dark or light UI theme.
+
+Configuration is read from `JARVIS_CONFIG_FILE` when that absolute path is set,
+otherwise from `~/.config/jarvis/.env` if it exists, then from the project
+`.env`. Setup uses the same selection and does not overwrite existing values.
+`.env.example` remains the safe template for new configurations.
 
 For an installed layout that keeps the Kokoro worker interpreter elsewhere,
 `JARVIS_KOKORO_PYTHON` can point to its executable. If unset, Jarvis uses
 `.venv-kokoro/bin/python` next to the application files.
 
-`TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to an existing `.env` if it is missing, without changing an existing value.
+`TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to the selected configuration if it is missing, without changing an existing value.
 
 The general terminal command tool is disabled by default in `.env.example`. To enable it locally, set `TERMINAL_COMMANDS_ENABLED=true`. `TERMINAL_WRITE_ROOT` sets the only user directory the sandbox can access; the template uses `~/`. Under the default tier mapping, Tier 1 commands read this directory and Tier 2 commands can write there after approval. The sandbox's `HOME` and `~` resolve to this root. The current development `.env` uses the project directory as its root, so a request for the sandbox home writes there rather than to the host home. Tool results report `access_root` and `sandbox_home` to make the destination explicit.
 
@@ -108,16 +125,66 @@ storage paths, even when the configured terminal root contains them.
 
 ### 5. Start Jarvis
 
-Run the voice assistant with:
+Open the launcher:
+
+```bash
+./jarvis
+```
+
+Select **Start Jarvis**. A compact status indicator changes color as Jarvis
+listens, processes a request, waits for approval, or speaks. In Settings, choose
+the **pill** indicator with a short state label or a **dot** with no label. It
+stays above other windows by default; its setting can be changed in the launcher.
+On Hyprland, the launcher retries the float request until the indicator is
+reported as floating, then pins it across workspaces by default. In Settings,
+you can turn off **Show on all workspaces**, choose a monitor output, and adjust
+the pill width (140–480 px) and height (22–80 px). A blank monitor setting keeps
+it on the output where it starts; monitor placement and workspace pinning require
+Hyprland. Closing the main window minimizes it; use **Stop Jarvis** for a clean
+shutdown. The assistant process does not send transcripts or responses to the
+launcher.
+
+To run with no visible Jarvis windows while keeping the assistant running,
+uncheck the status indicator and close the main window to minimize the launcher.
+The launcher stays in the taskbar so you can reopen it and stop Jarvis later.
+
+To run without the launcher or status window, use:
+
+```bash
+./jarvis --headless
+```
+
+This replaces the launcher with the voice loop in the current terminal. The
+existing direct command also remains available:
 
 ```bash
 .venv/bin/python -m voice.assistant_loop
 ```
 
-Speak the wake word, then give Jarvis a command. Press `Ctrl+C` in the terminal to stop it.
+To skip the full launcher while keeping the floating status indicator, use:
 
-Only one Jarvis runtime can run for the current user at a time. A second launch
-reports that Jarvis is already running and exits.
+```bash
+./jarvis --indicator-only
+```
+
+This starts Jarvis automatically with the main window hidden. Click the
+indicator to show the launcher, or right-click it for Settings and Stop Jarvis.
+Press `Ctrl+C` in the launching terminal to stop the indicator and assistant.
+
+To stop other Jarvis processes from this checkout before starting a new
+instance, add `--kill-existing`. It can be combined with `--headless` or
+`--indicator-only`:
+
+```bash
+./jarvis --kill-existing
+```
+
+You can also open the settings window directly with
+`.venv/bin/python -m jarvis_ui.settings`.
+
+Speak the wake word, then give Jarvis a command. Press `Ctrl+C` in headless mode
+to stop it. In launcher mode, use **Stop Jarvis**. Only one assistant runtime
+can run for the current user at a time.
 
 Jarvis prefers a purpose-built tool when one covers the requested action. For
 local facts without a matching tool, it can generate a Tier 1 read-only

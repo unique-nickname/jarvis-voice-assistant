@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="$APP_ROOT/.venv/bin/python"
+
+if [[ ! -x "$PYTHON" ]]; then
+    echo "Jarvis is not set up yet. Run $APP_ROOT/setup.sh first." >&2
+    exit 1
+fi
+
+cd "$APP_ROOT"
+exec "$PYTHON" -m jarvis_ui.launcher "$@"

@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")"
+PROJECT_ROOT="$PWD"
 
 echo "=== Jarvis setup ==="
 
@@ -10,7 +11,7 @@ echo "=== Jarvis setup ==="
 if ! command -v pacman >/dev/null 2>&1; then
     echo "Note: This script is designed for Arch Linux."
 else
-    for pkg in portaudio espeak-ng; do
+    for pkg in portaudio espeak-ng tk; do
         if ! pacman -Q "$pkg" >/dev/null 2>&1; then
             echo "System package may be needed: $pkg"
             echo "Install it with: sudo pacman -S $pkg"
@@ -148,21 +149,73 @@ else
     echo "Warning: requirements-kokoro.txt is empty."
 fi
 
-# Create or update local configuration without overwriting user values
-if [[ ! -f .env ]]; then
+# Select the same configuration path as core.config.configuration_file().
+CONFIG_FILE="${JARVIS_CONFIG_FILE:-}"
+if [[ -n "$CONFIG_FILE" ]]; then
+    if [[ "$CONFIG_FILE" != /* ]]; then
+        echo "Error: JARVIS_CONFIG_FILE must be an absolute path."
+        exit 1
+    fi
+elif [[ -n "${XDG_CONFIG_HOME:-}" && "${XDG_CONFIG_HOME}" == /* ]]; then
+    if [[ -f "$XDG_CONFIG_HOME/jarvis/.env" ]]; then
+        CONFIG_FILE="$XDG_CONFIG_HOME/jarvis/.env"
+    else
+        CONFIG_FILE="$PROJECT_ROOT/.env"
+    fi
+elif [[ -f "$HOME/.config/jarvis/.env" ]]; then
+    CONFIG_FILE="$HOME/.config/jarvis/.env"
+else
+    CONFIG_FILE="$PROJECT_ROOT/.env"
+fi
+
+CONFIG_DIRECTORY="$(dirname -- "$CONFIG_FILE")"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+if [[ "$CONFIG_HOME" != /* ]]; then
+    CONFIG_HOME="$HOME/.config"
+fi
+if [[ -L "$CONFIG_DIRECTORY" || -L "$CONFIG_FILE" ]]; then
+    echo "Error: refusing to use a symbolic link for Jarvis configuration."
+    exit 1
+fi
+if [[ -f "$CONFIG_FILE" && ! -O "$CONFIG_FILE" ]]; then
+    echo "Error: Jarvis configuration is not owned by the current user."
+    exit 1
+fi
+if [[ "$CONFIG_DIRECTORY" != "$PROJECT_ROOT" ]]; then
+    mkdir -p -- "$CONFIG_DIRECTORY"
+    if [[ ! -O "$CONFIG_DIRECTORY" ]]; then
+        echo "Error: Jarvis configuration directory is not owned by the current user."
+        exit 1
+    fi
+    if [[ "$CONFIG_DIRECTORY" == "$CONFIG_HOME/jarvis" ]]; then
+        chmod 700 -- "$CONFIG_DIRECTORY"
+    fi
+fi
+
+# Create or update the selected configuration without overwriting user values.
+if [[ ! -f "$CONFIG_FILE" ]]; then
     if [[ -f .env.example ]]; then
-        cp .env.example .env
-        echo "Created .env from .env.example."
-        echo "Add your own API key to .env before running Jarvis."
+        cp .env.example "$CONFIG_FILE"
+        chmod 600 -- "$CONFIG_FILE"
+        echo "Created Jarvis configuration at $CONFIG_FILE."
+        echo "Add your own OpenAI API key before running Jarvis."
     else
         echo "Warning: .env.example is missing."
     fi
 elif [[ -f .env.example ]]; then
-    echo "Existing .env preserved."
+    echo "Existing configuration preserved at $CONFIG_FILE."
 
     # Add missing optional settings without changing existing values.
     for key in \
+        JARVIS_UI_THEME \
+        JARVIS_APPLICATION_ALLOWLIST \
         CONVERSATION_TIMEOUT_SECONDS \
+        STATUS_INDICATOR_ALWAYS_ON_TOP \
+        STATUS_INDICATOR_STYLE \
+        STATUS_INDICATOR_PERSISTENT \
+        STATUS_INDICATOR_MONITOR \
+        STATUS_INDICATOR_WIDTH \
+        STATUS_INDICATOR_HEIGHT \
         TERMINAL_APPROVAL_FLOATING \
         TERMINAL_COMMANDS_ENABLED \
         TERMINAL_WRITE_ROOT \
@@ -178,15 +231,22 @@ elif [[ -f .env.example ]]; then
         CLIP_AUDIO \
         CLIP_DIRECTORY
     do
-        if ! grep -qE "^[[:space:]]*${key}=" .env; then
+        if ! grep -qE "^[[:space:]]*${key}=" "$CONFIG_FILE"; then
             value="$(grep -E "^${key}=" .env.example | tail -n 1 || true)"
 
             if [[ -n "$value" ]]; then
-                printf '\n%s\n' "$value" >> .env
+                printf '\n%s\n' "$value" >> "$CONFIG_FILE"
                 echo "Added missing setting: $key"
             fi
         fi
     done
+fi
+chmod 600 -- "$CONFIG_FILE"
+
+if ! .venv/bin/python -c 'import tkinter' >/dev/null 2>&1; then
+    echo "Warning: Tkinter is unavailable in .venv; the desktop launcher and settings window will not run."
+    echo "On Arch Linux, install the Tk runtime with: sudo pacman -S tk"
+    echo "The voice assistant remains available from the terminal."
 fi
 
 # Verify required wake-word models
@@ -210,4 +270,6 @@ fi
 echo
 echo "Setup finished."
 echo "Activate the main environment with: source .venv/bin/activate"
-echo "Run the voice assistant with: .venv/bin/python -m voice.assistant_loop"
+echo "Run the desktop launcher with: ./jarvis"
+echo "Run without UI with: ./jarvis --headless"
+echo "Run with only the status indicator: ./jarvis --indicator-only"

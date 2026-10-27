@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai import OpenAI
+from core.status import emit_runtime_status
 from tools.registry import TOOLS, TOOL_HANDLERS
 
 client = OpenAI()
@@ -73,6 +74,8 @@ REQUEST ROUTING
   generated for this request only when no suitable read-only tool exists.
 - For a requested action, use a purpose-built tool when one covers it. Do not
   substitute a terminal command for an available dedicated tool.
+- When the user asks to review or change Jarvis settings, open the local
+  settings window and explain that changes take effect after a restart.
 - If no dedicated tool covers an action, generate a command specifically for
   this request and use the single generic `run_terminal_command` tool. Tier 1
   is for safe inspection only. The application may route an unrecognized
@@ -205,6 +208,7 @@ def ask(
     if conversation is not None and conversation.previous_response_id:
         request["previous_response_id"] = conversation.previous_response_id
 
+    emit_runtime_status("thinking")
     response = client.responses.create(**request)
 
     max_tool_rounds = 6 if conversation is not None else 5
@@ -241,6 +245,7 @@ def ask(
                         result = {"error": "Unknown tool"}
                     else:
                         arguments = json.loads(call.arguments)
+                        emit_runtime_status("executing")
                         result = handler(**arguments)
 
             except Exception as exc:
@@ -252,6 +257,7 @@ def ask(
                 "output": json.dumps(result),
             })
 
+        emit_runtime_status("thinking")
         response = client.responses.create(
             model=MODEL,
             instructions=instructions,

@@ -16,6 +16,7 @@ from tools.scheduled_actions import (
     SCHEDULED_TOOL_ACTION_TOOLS,
 )
 from tools.windows import focus_window, list_open_windows
+from tools.settings import open_settings
 
 
 TERMINAL_TOOLS = [
@@ -136,10 +137,25 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "open_settings",
+        "description": (
+            "Open Jarvis's local configuration window so the user can review "
+            "or change settings. Changes apply after Jarvis restarts."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "open_application",
         "description": (
-            "Open an approved desktop application by its friendly name. "
-            "Only applications in the allowlist are supported."
+            "Open a desktop application by its friendly name from the user's "
+            "Settings > Applications allowlist. Only listed applications are supported."
         ),
         "parameters": {
             "type": "object",
@@ -448,6 +464,7 @@ def get_local_time():
 
 TOOL_HANDLERS = {
     "get_local_time": get_local_time,
+    "open_settings": open_settings,
     "open_application": open_application,
     "get_system_status": get_system_status,
     "control_volume": control_volume,

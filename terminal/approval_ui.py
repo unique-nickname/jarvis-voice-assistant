@@ -129,23 +129,10 @@ def _find_window_address(
 
 def _request_floating(hyprctl: str, address: str) -> bool:
     environment = _display_environment()
-    legacy_result = subprocess.run(
-        [hyprctl, "dispatch", "setfloating", f"address:{address}"],
-        text=True,
-        capture_output=True,
-        check=False,
-        close_fds=True,
-        shell=False,
-        env=environment,
-        timeout=0.5,
-    )
-    if legacy_result.returncode == 0:
-        return True
-
     selector = json.dumps(f"address:{address}")
     lua_dispatcher = (
-        "hl.dsp.window.float({ action = \"set\", "
-        f"window = hl.get_window({selector}) }})"
+        "hl.dsp.window.float({ action = \"on\", "
+        f"window = {selector} }})"
     )
     lua_result = subprocess.run(
         [hyprctl, "dispatch", lua_dispatcher],
@@ -155,9 +142,22 @@ def _request_floating(hyprctl: str, address: str) -> bool:
         close_fds=True,
         shell=False,
         env=environment,
-        timeout=0.5,
+        timeout=1.5,
     )
     if lua_result.returncode == 0:
+        return True
+
+    legacy_result = subprocess.run(
+        [hyprctl, "dispatch", "setfloating", f"address:{address}"],
+        text=True,
+        capture_output=True,
+        check=False,
+        close_fds=True,
+        shell=False,
+        env=environment,
+        timeout=1.5,
+    )
+    if legacy_result.returncode == 0:
         return True
 
     legacy_detail = (legacy_result.stderr or legacy_result.stdout).strip()[:200]
@@ -309,6 +309,9 @@ def review_approval(queue: ApprovalQueue, request_id: str) -> ApprovalState:
         f"--timeout={timeout_seconds}",
     ]
 
+    from core.status import emit_runtime_status
+
+    emit_runtime_status("waiting_approval")
     try:
         result = _run_zenity(
             command,
@@ -320,6 +323,8 @@ def review_approval(queue: ApprovalQueue, request_id: str) -> ApprovalState:
         return _deny_if_pending(queue, request_id)
     except OSError as exc:
         raise ApprovalWindowError("Could not start the local approval window.") from exc
+    finally:
+        emit_runtime_status("executing")
 
     if result.returncode == 0:
         return queue.approve_from_ui(request_id).state

@@ -31,16 +31,12 @@ def _kokoro_python() -> Path:
                     else PROJECT_DIR / candidate
                 )
 
-    try:
-        candidate = candidate.resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise RuntimeError(
-            "Kokoro's Python interpreter is unavailable. Set "
-            "JARVIS_KOKORO_PYTHON or run setup.sh."
-        ) from exc
+    # Keep the virtual-environment path itself. Resolving a venv's python
+    # symlink can launch its base interpreter and lose the venv site-packages.
+    candidate = Path(os.path.abspath(candidate))
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
         raise RuntimeError(
-            "Kokoro's Python interpreter is not executable. Set "
+            "Kokoro's Python interpreter is unavailable or not executable. Set "
             "JARVIS_KOKORO_PYTHON or run setup.sh."
         )
     return candidate

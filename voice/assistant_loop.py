@@ -5,9 +5,12 @@ import time
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from core.config import configuration_file
+
+load_dotenv(configuration_file())
 
 from core.instance_lock import JarvisAlreadyRunningError, JarvisInstanceLock
+from core.status import emit_runtime_status
 
 
 DEFAULT_CONVERSATION_TIMEOUT_SECONDS = 12
@@ -63,14 +66,22 @@ def normalize_voice_command(text: str) -> str:
 
 
 def main():
+    emit_runtime_status("starting")
     try:
         instance_lock = JarvisInstanceLock.acquire()
     except JarvisAlreadyRunningError as exc:
+        emit_runtime_status("already_running")
         print(str(exc))
         return
 
     try:
         _run_assistant()
+    except KeyboardInterrupt:
+        print("\nJarvis shutting down.")
+        emit_runtime_status("stopped")
+    except Exception:
+        emit_runtime_status("error")
+        raise
     finally:
         instance_lock.close()
 
@@ -95,6 +106,7 @@ def _run_assistant():
     scheduled_action_service = None
 
     try:
+        emit_runtime_status("starting")
         followup_timeout = conversation_timeout_seconds()
         timer_service = TimerService()
         recorder = ClipRecorder()
@@ -119,8 +131,11 @@ def _run_assistant():
         print("Jarvis is online. Press Ctrl+C to stop.")
 
         while True:
+            emit_runtime_status("wake_word")
             initial_audio = wait_for_wake_word()
+            emit_runtime_status("listening_command")
             audio = record_audio(initial_audio=initial_audio)
+            emit_runtime_status("thinking")
             text = transcribe(audio)
             text = normalize_voice_command(text)
 
@@ -142,10 +157,12 @@ def _run_assistant():
                     )
                 except Exception as exc:
                     print(f"[Assistant error] {exc}")
+                    emit_runtime_status("error")
                     conversation.reset()
                     break
 
                 print(f"Jarvis: {response}")
+                emit_runtime_status("speaking")
                 playback_completed = speak(response)
 
                 # Let residual speaker audio and the audio pipeline settle.
@@ -159,6 +176,7 @@ def _run_assistant():
                     "Listening for a follow-up for "
                     f"{followup_timeout} seconds..."
                 )
+                emit_runtime_status("follow_up")
                 followup_audio = record_audio(
                     speech_start_timeout_seconds=followup_timeout,
                 )
@@ -179,6 +197,7 @@ def _run_assistant():
         print("\nJarvis shutting down.")
 
     finally:
+        emit_runtime_status("stopped")
         try:
             if scheduled_action_service is not None:
                 scheduled_action_service.close()

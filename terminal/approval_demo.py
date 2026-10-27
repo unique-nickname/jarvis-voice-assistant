@@ -6,12 +6,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from dotenv import load_dotenv
+from core.config import configuration_file
 
 from terminal.approval import ApprovalQueue, ApprovalState
 from terminal.approval_ui import ApprovalWindowError, review_approval
 from terminal.policy import ChangePreview, OperationDefinition, OperationRegistry, RiskTier
 
-load_dotenv()
+load_dotenv(configuration_file())
 
 
 def _validate_demo_arguments(arguments: Mapping[str, Any]) -> None:

@@ -1,7 +1,9 @@
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from core.config import configuration_file
+
+load_dotenv(configuration_file())
 
 from core.instance_lock import JarvisAlreadyRunningError, JarvisInstanceLock
 

@@ -13,6 +13,7 @@ from core.config import PROJECT_ROOT
 
 MANAGED_MARKER = "X-Jarvis-Managed=desktop-entry-v1"
 APPLICATION_DIRECTORY = "applications"
+APPLICATION_ICON = PROJECT_ROOT / "icon.jpg"
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ def _render_entry(entry: DesktopEntry) -> str:
         "Type=Application",
         f"Name={_escape_desktop_value(entry.name)}",
         f"Comment={_escape_desktop_value(entry.comment)}",
+        f"Icon={_escape_desktop_value(str(APPLICATION_ICON))}",
         f"Exec={command}",
         f"Path={_escape_desktop_value(str(PROJECT_ROOT))}",
         "Terminal=false",
@@ -167,7 +169,11 @@ def install_entries() -> int:
     if not launcher.is_file() or not os.access(launcher, os.X_OK):
         raise SystemExit(f"Jarvis launcher is missing or not executable: {launcher}")
     if not python.is_file() or not os.access(python, os.X_OK):
-        raise SystemExit(f"Jarvis environment is missing; run setup.sh first: {python}")
+        raise SystemExit(
+            f"Jarvis environment is missing; run setup.sh first: {python}"
+        )
+    if not APPLICATION_ICON.is_file():
+        raise SystemExit(f"Jarvis application icon is missing: {APPLICATION_ICON}")
 
     directory = _applications_directory()
     targets = [directory / entry.filename for entry in ENTRIES]

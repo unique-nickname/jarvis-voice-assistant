@@ -35,6 +35,20 @@ check_runtime_executable /usr/bin/bwrap bubblewrap "the sandboxed terminal comma
 check_runtime_executable /usr/bin/prlimit util-linux "the sandboxed terminal command tool"
 check_runtime_executable /usr/bin/fish fish "the terminal command tool"
 
+check_optional_command() {
+    local executable_name="$1"
+    local feature_name="$2"
+
+    if ! command -v "$executable_name" >/dev/null 2>&1; then
+        echo "Warning: $executable_name is missing; $feature_name will be unavailable."
+    fi
+}
+
+check_optional_command hyprctl "Hyprland window listing and focus tools"
+check_optional_command pactl "audio output listing and selection tools"
+check_optional_command xdg-open "opening supported files in desktop applications"
+check_optional_command notify-send "desktop timer notifications"
+
 if [[ ! -x /usr/bin/zenity && ! -x /bin/zenity ]]; then
     echo "Warning: zenity is missing; the local approval window will be unavailable."
     if command -v pacman >/dev/null 2>&1; then
@@ -146,6 +160,7 @@ elif [[ -f .env.example ]]; then
 
     # Add missing optional settings without changing existing values.
     for key in \
+        CONVERSATION_TIMEOUT_SECONDS \
         TERMINAL_APPROVAL_FLOATING \
         TERMINAL_COMMANDS_ENABLED \
         TERMINAL_WRITE_ROOT \

@@ -7,14 +7,24 @@ from core.assistant import ask
 from memory import MemoryService
 from terminal.operations import create_terminal_service
 from tools.registry import handlers_for, tools_for
+from tools.timers import TimerService
 
 
 def main():
     memory_service = MemoryService()
+    timer_service = TimerService()
     try:
         terminal_service = create_terminal_service()
-        assistant_tools = tools_for(memory_service, terminal_service)
-        tool_handlers = handlers_for(memory_service, terminal_service)
+        assistant_tools = tools_for(
+            memory_service,
+            terminal_service,
+            timer_service,
+        )
+        tool_handlers = handlers_for(
+            memory_service,
+            terminal_service,
+            timer_service,
+        )
         print("Jarvis initialized. Type 'exit' to quit.")
 
         while True:
@@ -39,7 +49,10 @@ def main():
     except KeyboardInterrupt:
         print("\nJarvis shutting down.")
     finally:
-        memory_service.close()
+        try:
+            timer_service.close()
+        finally:
+            memory_service.close()
 
 
 if __name__ == "__main__":

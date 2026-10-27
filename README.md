@@ -12,8 +12,11 @@ Jarvis combines wake-word detection, speech recognition, text-to-speech, and an 
 - Speech-to-text using Faster Whisper.
 - AI responses and tool calling using the OpenAI API.
 - Text-to-speech using Kokoro.
-- Desktop application launching.
-- Basic system status reporting.
+- Allowlisted desktop application launching and Hyprland window focus.
+- System status reporting, including disk and OS details.
+- Bounded filename search and opening supported files under the home folder.
+- One-shot desktop timers while Jarvis is running.
+- Audio output listing and selection.
 - A sandboxed Fish command tool with configurable risk tiers: the default mapping runs recognized read-only commands directly, requires local approval for modifications and unknown commands, and denies known high-risk commands.
 - Volume control for separate audio streams.
 - Ability to make video clips.
@@ -33,6 +36,10 @@ Features are actively being developed, so some functionality may be incomplete.
 - `bubblewrap` and `prlimit` (from `util-linux`) for the sandboxed terminal tool.
 - Fish for the general terminal command tool.
 - `zenity` for the local approval window used by Tier 2 terminal commands.
+- `notify-send` for timer notifications, `xdg-open` for supported file opening,
+  and `pactl` for audio output selection.
+- `hyprctl` for window listing and focus on Hyprland; these window tools are
+  unavailable on other desktop environments.
 
 ## Installation
 
@@ -99,6 +106,26 @@ Run the voice assistant with:
 ```
 
 Speak the wake word, then give Jarvis a command. Press `Ctrl+C` in the terminal to stop it.
+
+Jarvis prefers a purpose-built tool when one covers the requested action. For
+local facts without a matching tool, it can generate a Tier 1 read-only
+terminal command. For a requested modification without a matching tool, it can
+generate a Tier 2 command, which requires the local approval window. Terminal
+commands are composed for the specific request; they are not pre-made command
+tools. Tier 3 remains subject to the configured terminal policy.
+
+File search returns filenames only, skips hidden folders, and stays under the
+home directory. File opening is limited to supported document and media types.
+Timers use desktop notifications, remain in memory only, and are cancelled
+when Jarvis shuts down.
+
+After a response, Jarvis listens for a follow-up only when it has a meaningful
+question or needs your answer to continue the current interaction. It does not
+add a generic "anything else" prompt to every response. The listening window
+defaults to 12 seconds and can be changed with `CONVERSATION_TIMEOUT_SECONDS`
+in `.env` (whole numbers from 1 to 120). When the window expires, Jarvis clears
+that conversation context and returns to wake-word listening. A conversation
+also ends after 20 user turns to keep its context bounded.
 
 ## Troubleshooting
 

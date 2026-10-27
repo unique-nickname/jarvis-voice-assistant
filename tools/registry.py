@@ -8,7 +8,10 @@ from tools.desktop import (
     control_media,
     control_clips,
 )
+from tools.audio_outputs import list_audio_outputs, set_audio_output
+from tools.file_actions import open_file, search_files
 from tools.memory import MEMORY_TOOLS, create_memory_handlers
+from tools.windows import focus_window, list_open_windows
 
 
 TERMINAL_TOOLS = [
@@ -16,8 +19,9 @@ TERMINAL_TOOLS = [
         "type": "function",
         "name": "run_terminal_command",
         "description": (
-            "Run one Fish command inside the configured filesystem sandbox. "
-            "Jarvis assigns the risk tier. Recognized read-only commands run "
+            "Run one Fish command generated specifically for the user's request "
+            "inside the configured filesystem sandbox. The application assigns "
+            "the risk tier. Recognized read-only commands run "
             "without a prompt; modifying or unrecognized commands require "
             "approval in the local window by default. Known high-risk commands "
             "are denied by default; local tier overrides can change this routing. "
@@ -53,6 +57,63 @@ TERMINAL_TOOLS = [
         },
         "strict": True,
     }
+]
+
+
+TIMER_TOOLS = [
+    {
+        "type": "function",
+        "name": "create_timer",
+        "description": (
+            "Create a one-shot desktop reminder while Jarvis is running. "
+            "Use the user's requested duration and a short label."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "duration_seconds": {
+                    "type": "integer",
+                    "description": "Timer duration from 1 second to 86400 seconds.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Short notification text describing the reminder.",
+                },
+            },
+            "required": ["duration_seconds", "label"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "list_timers",
+        "description": "List active one-shot timers and their remaining time.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "cancel_timer",
+        "description": "Cancel one active timer by the timer ID returned when it was created.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "timer_id": {
+                    "type": "string",
+                    "description": "Exact active timer ID.",
+                },
+            },
+            "required": ["timer_id"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
 ]
 
 
@@ -96,14 +157,132 @@ TOOLS = [
         "type": "function",
         "name": "get_system_status",
         "description": (
-            "Get current CPU usage, RAM usage, and battery status "
-            "when available. Use this when the user asks about "
-            "system resource usage or battery level."
+            "Get current CPU, RAM, disk, operating-system, hostname, and "
+            "battery status when available. Use this for questions about "
+            "local system health or machine details."
         ),
         "parameters": {
             "type": "object",
             "properties": {},
             "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "list_open_windows",
+        "description": (
+            "List visible windows on a Hyprland desktop, including app and "
+            "title. Use this before focusing a window when the target is not "
+            "uniquely known."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "focus_window",
+        "description": (
+            "Focus one existing Hyprland window by its app name or title. "
+            "If several windows match, the tool refuses and returns candidates."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "match": {
+                    "type": "string",
+                    "description": "App name or window title to match.",
+                },
+            },
+            "required": ["match"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "search_files",
+        "description": (
+            "Search filenames under the user's home directory. This searches "
+            "names only, never file contents. Hidden folders are skipped, "
+            "search is bounded, and paths outside home are refused."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_query": {
+                    "type": "string",
+                    "description": "Filename fragment to search for.",
+                },
+                "directory": {
+                    "type": ["string", "null"],
+                    "description": "Optional starting directory under home, or null for home.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of matches, from 1 to 20.",
+                },
+            },
+            "required": ["name_query", "directory", "limit"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "open_file",
+        "description": (
+            "Open a user-selected supported document or media file under the "
+            "home directory in its desktop application. It does not read the "
+            "file contents. Use only when the user asks to open a file."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The exact path returned by search_files or provided by the user.",
+                },
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "list_audio_outputs",
+        "description": "List available audio output devices and identify the default.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "set_audio_output",
+        "description": (
+            "Set the default audio output to one uniquely matching device. "
+            "If a spoken name is ambiguous, list outputs and ask the user."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "match": {
+                    "type": "string",
+                    "description": "Exact or unique substring of the output name or description.",
+                },
+            },
+            "required": ["match"],
             "additionalProperties": False,
         },
         "strict": True,
@@ -271,20 +450,28 @@ TOOL_HANDLERS = {
     "control_app_volume": control_app_volume,
     "control_media": control_media,
     "control_clips": control_clips,
+    "list_open_windows": list_open_windows,
+    "focus_window": focus_window,
+    "search_files": search_files,
+    "open_file": open_file,
+    "list_audio_outputs": list_audio_outputs,
+    "set_audio_output": set_audio_output,
 }
 
 
-def tools_for(memory_service=None, terminal_service=None):
+def tools_for(memory_service=None, terminal_service=None, timer_service=None):
     """Return the tool schemas available to an assistant request."""
     available_tools = TOOLS
     if memory_service is not None:
         available_tools = [*available_tools, *MEMORY_TOOLS]
     if terminal_service is not None:
         available_tools = [*available_tools, *TERMINAL_TOOLS]
+    if timer_service is not None:
+        available_tools = [*available_tools, *TIMER_TOOLS]
     return available_tools
 
 
-def handlers_for(memory_service=None, terminal_service=None):
+def handlers_for(memory_service=None, terminal_service=None, timer_service=None):
     """Return static handlers plus those bound to active services."""
     handlers = dict(TOOL_HANDLERS)
     if memory_service is not None:
@@ -299,4 +486,10 @@ def handlers_for(memory_service=None, terminal_service=None):
             )
 
         handlers["run_terminal_command"] = run_terminal_command
+    if timer_service is not None:
+        handlers.update({
+            "create_timer": timer_service.create_timer,
+            "list_timers": timer_service.list_timers,
+            "cancel_timer": timer_service.cancel_timer,
+        })
     return handlers

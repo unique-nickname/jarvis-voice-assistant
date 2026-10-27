@@ -49,9 +49,10 @@ def initialize():
             )
 
 
-def speak(text: str):
+def speak(text: str) -> bool:
+    """Speak text and report whether playback completed successfully."""
     if not text.strip():
-        return
+        return False
 
     try:
         initialize()
@@ -64,9 +65,14 @@ def speak(text: str):
 
             if not result.get("ok"):
                 print(f"[TTS error] {result.get('error')}")
+                return False
 
-    except (OSError, RuntimeError, BrokenPipeError) as exc:
+            return True
+
+    except (OSError, RuntimeError, ValueError, BrokenPipeError) as exc:
         print(f"[TTS error] {exc}")
+        return False
+
 
 def shutdown():
     global _worker

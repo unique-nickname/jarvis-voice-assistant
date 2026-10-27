@@ -1,7 +1,9 @@
-import shutil
-import subprocess
 import os
+import platform
+import shutil
 import signal
+import socket
+import subprocess
 
 # Friendly names mapped to executable commands.
 # Add or remove entries to match your installed applications.
@@ -433,19 +435,27 @@ def open_application(name: str) -> dict:
         }
 
 def get_system_status() -> dict:
-    """Return current CPU, memory, and battery status."""
+    """Return current CPU, memory, disk, operating-system, and battery status."""
     import psutil
 
     # A short interval gives CPU usage a meaningful measurement.
     cpu_percent = psutil.cpu_percent(interval=0.5)
 
     memory = psutil.virtual_memory()
+    disk = psutil.disk_usage(os.path.expanduser("~"))
 
     status = {
         "cpu_usage_percent": cpu_percent,
         "memory_usage_percent": memory.percent,
         "memory_used_gb": round(memory.used / (1024 ** 3), 2),
         "memory_total_gb": round(memory.total / (1024 ** 3), 2),
+        "disk_free_gb": round(disk.free / (1024 ** 3), 2),
+        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "disk_usage_percent": disk.percent,
+        "hostname": socket.gethostname(),
+        "operating_system": platform.system(),
+        "os_release": platform.release(),
+        "architecture": platform.machine(),
     }
 
     battery = psutil.sensors_battery()

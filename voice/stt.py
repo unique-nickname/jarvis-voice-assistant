@@ -27,17 +27,21 @@ print("Whisper model ready.")
 def record_audio(
     silence_seconds: float = 1.2,
     max_seconds: float = 20.0,
-    startup_seconds: float = 8.0,
+    speech_start_timeout_seconds: float = 8.0,
     initial_audio: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Record speech, optionally continuing from buffered audio."""
+    """Record speech, optionally continuing from buffered audio.
+
+    If no speech is detected before ``speech_start_timeout_seconds``, return
+    an empty audio array.
+    """
     frames = []
     trailing_silence = collections.deque()
     pending_speech = collections.deque()
 
     silence_frames = int(silence_seconds * 1000 / FRAME_MS)
     max_frames = int(max_seconds * 1000 / FRAME_MS)
-    startup_frames = int(startup_seconds * 1000 / FRAME_MS)
+    startup_frames = int(speech_start_timeout_seconds * 1000 / FRAME_MS)
 
     # Buffered audio is already captured, so don't wait for speech again.
     if initial_audio is not None and initial_audio.size > 0:

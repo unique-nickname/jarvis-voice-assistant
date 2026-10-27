@@ -23,6 +23,16 @@ _MAX_COMMAND_TMP_BYTES = 67_108_864
 _MAX_PROCESSES = 32
 _MAX_COMMAND_FILE_BYTES = 268_435_456
 _MAX_ADDRESS_SPACE_BYTES = 268_435_456
+_VISIBLE_SYSTEM_ROOTS = (
+    Path("/usr"),
+    Path("/bin"),
+    Path("/sbin"),
+    Path("/lib"),
+    Path("/lib64"),
+    Path("/etc"),
+    Path("/opt"),
+    Path("/var"),
+)
 _OUTER_ENVIRONMENT = {
     "PATH": "/usr/bin:/bin",
     "LANG": "C",
@@ -473,9 +483,15 @@ class BubblewrapExecutor:
                 )
                 if is_secret:
                     if candidate.is_symlink():
-                        raise SandboxError("Protected directories cannot be symlinks.")
-                    protected_directories.append(candidate)
-                    count += 1
+                        count += BubblewrapExecutor._protect_symlink_target(
+                            candidate,
+                            root,
+                            protected_directories,
+                            protected_files,
+                        )
+                    else:
+                        protected_directories.append(candidate)
+                        count += 1
                 else:
                     retained_directories.append(name)
             directory_names[:] = retained_directories
@@ -494,8 +510,13 @@ class BubblewrapExecutor:
                 ):
                     candidate = current / name
                     if candidate.is_symlink():
-                        raise SandboxError("Protected files cannot be symlinks.")
-                    if candidate.is_file():
+                        count += BubblewrapExecutor._protect_symlink_target(
+                            candidate,
+                            root,
+                            protected_directories,
+                            protected_files,
+                        )
+                    elif candidate.is_file():
                         protected_files.append(candidate)
                         count += 1
             if count > _SECRET_SCAN_LIMIT:
@@ -533,6 +554,41 @@ class BubblewrapExecutor:
         for file_path in visible_files:
             arguments.extend(["--ro-bind", "/dev/null", str(file_path)])
         return arguments
+
+    @staticmethod
+    def _protect_symlink_target(
+        candidate: Path,
+        root: Path,
+        protected_directories: list[Path],
+        protected_files: list[Path],
+    ) -> int:
+        """Mask a sensitive symlink's target if that target is sandbox-visible.
+
+        Symlink targets outside the access root are visible only when they fall
+        under one of the system trees explicitly mounted by the sandbox. Other
+        external targets are inaccessible there, so they need no masking.
+        Broken links and loops also expose no target contents.
+        """
+        try:
+            target = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return 0
+
+        if not target.is_relative_to(root) and not any(
+            target.is_relative_to(system_root)
+            for system_root in _VISIBLE_SYSTEM_ROOTS
+        ):
+            return 0
+
+        if target.is_dir():
+            protected_directories.append(target)
+        elif target.is_file():
+            protected_files.append(target)
+        else:
+            raise SandboxError(
+                "A protected symlink target is not a regular file or directory."
+            )
+        return 1
 
     def _collect_output(
         self,

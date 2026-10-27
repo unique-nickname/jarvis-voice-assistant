@@ -41,6 +41,7 @@ class CommandTerminalService(TerminalService):
         executor: BubblewrapExecutor | None = None,
         reviewer: ApprovalReviewer = review_approval,
         tier_overrides: Mapping[RiskTier, RiskTier] | None = None,
+        protected_paths: tuple[str | Path, ...] = (),
     ) -> None:
         try:
             self.access_root = Path(access_root).expanduser().resolve(strict=True)
@@ -50,10 +51,29 @@ class CommandTerminalService(TerminalService):
             ) from exc
         if not self.access_root.is_dir() or self.access_root == Path("/"):
             raise ValueError("Terminal access root must be a non-root directory.")
+        resolved_protected_paths = []
+        for protected_path in protected_paths:
+            try:
+                protected = Path(protected_path).expanduser().resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            except (OSError, RuntimeError, TypeError) as exc:
+                raise ValueError(
+                    "A protected application path is unavailable."
+                ) from exc
+            if protected.is_dir() and self.access_root.is_relative_to(protected):
+                raise ValueError(
+                    "The terminal root cannot be inside protected application data."
+                )
+            resolved_protected_paths.append(protected)
+
         self.tier_overrides = MappingProxyType(
             self._validate_tier_overrides(tier_overrides)
         )
-        self._executor = executor or BubblewrapExecutor(timeout_seconds=30)
+        self._executor = executor or BubblewrapExecutor(
+            timeout_seconds=30,
+            protected_paths=tuple(resolved_protected_paths),
+        )
         self._command_lock = threading.Lock()
 
         read_definition = OperationDefinition(

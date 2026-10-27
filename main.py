@@ -3,20 +3,37 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.assistant import ask
-from memory import MemoryService
-from terminal.operations import create_terminal_service
-from tools.registry import handlers_for, tools_for
-from tools.scheduled_actions import ScheduledActionService
-from tools.timers import TimerService
+from core.instance_lock import JarvisAlreadyRunningError, JarvisInstanceLock
 
 
 def main():
+    try:
+        instance_lock = JarvisInstanceLock.acquire()
+    except JarvisAlreadyRunningError as exc:
+        print(str(exc))
+        return
+
+    try:
+        _run_repl()
+    finally:
+        instance_lock.close()
+
+
+def _run_repl():
+    from core.assistant import ask
+    from memory import MemoryService
+    from terminal.operations import create_terminal_service
+    from tools.registry import handlers_for, tools_for
+    from tools.scheduled_actions import ScheduledActionService
+    from tools.timers import TimerService
+
     memory_service = MemoryService()
     timer_service = TimerService()
     scheduled_action_service = None
     try:
-        terminal_service = create_terminal_service()
+        terminal_service = create_terminal_service(
+            protected_paths=memory_service.protected_paths,
+        )
         scheduled_action_service = ScheduledActionService()
         assistant_tools = tools_for(
             memory_service,

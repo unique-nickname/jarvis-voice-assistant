@@ -101,7 +101,12 @@ class BubblewrapExecutor:
     Bubblewrap setup failures fail closed with no host fallback.
     """
 
-    def __init__(self, *, timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        protected_paths: Sequence[str | Path] = (),
+    ) -> None:
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
@@ -109,6 +114,9 @@ class BubblewrapExecutor:
         ):
             raise ValueError("Sandbox timeout must be between 0 and 30 seconds.")
         self._timeout_seconds = float(timeout_seconds)
+        self._protected_paths = tuple(
+            Path(path).expanduser() for path in protected_paths
+        )
 
     def run_read_only_argv(
         self,
@@ -137,6 +145,7 @@ class BubblewrapExecutor:
                 cwd=cwd,
                 writable=False,
                 timeout_seconds=self._timeout_seconds,
+                protected_paths=self._protected_paths,
             )
         )
 
@@ -170,6 +179,7 @@ class BubblewrapExecutor:
                 writable=writable,
                 network_access=network_access,
                 timeout_seconds=self._timeout_seconds,
+                protected_paths=self._protected_paths,
             )
         )
 
@@ -283,6 +293,7 @@ class BubblewrapExecutor:
         writable: bool,
         network_access: bool = False,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        protected_paths: Sequence[str | Path] = (),
     ) -> list[str]:
         cpu_seconds = max(1, int(timeout_seconds) - 1)
         bwrap_command = [
@@ -369,7 +380,9 @@ class BubblewrapExecutor:
                 str(root),
             ]
         )
-        bwrap_command.extend(cls._secret_mask_arguments(root))
+        bwrap_command.extend(
+            cls._secret_mask_arguments(root, protected_paths=protected_paths)
+        )
 
         bwrap_command.extend(
             [
@@ -402,10 +415,43 @@ class BubblewrapExecutor:
         return bwrap_command
 
     @staticmethod
-    def _secret_mask_arguments(root: Path) -> list[str]:
+    def _secret_mask_arguments(
+        root: Path,
+        *,
+        protected_paths: Sequence[str | Path] = (),
+    ) -> list[str]:
         protected_directories: list[Path] = []
         protected_files: list[Path] = []
         count = 0
+
+        for protected_path in protected_paths:
+            try:
+                candidate = Path(protected_path).expanduser().resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            except (OSError, RuntimeError, TypeError) as exc:
+                raise SandboxError(
+                    "A protected application path is unavailable."
+                ) from exc
+
+            if candidate == root:
+                raise SandboxError(
+                    "The terminal root cannot be a protected application path."
+                )
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                continue
+
+            if candidate.is_dir():
+                protected_directories.append(candidate)
+            elif candidate.is_file():
+                protected_files.append(candidate)
+            else:
+                raise SandboxError(
+                    "A protected application path is not a regular file or directory."
+                )
+
         for current_root, directory_names, file_names in os.walk(
             root,
             topdown=True,
@@ -455,10 +501,36 @@ class BubblewrapExecutor:
             if count > _SECRET_SCAN_LIMIT:
                 raise SandboxError("Too many protected paths to prepare safely.")
 
+        # A parent tmpfs already hides every protected path beneath it. Avoid
+        # generating nested mounts, which Bubblewrap may reject.
+        unique_directories = sorted(
+            set(protected_directories),
+            key=lambda item: (len(item.parts), str(item)),
+        )
+        visible_directories: list[Path] = []
+        for directory in unique_directories:
+            if not any(
+                directory.is_relative_to(parent)
+                for parent in visible_directories
+            ):
+                visible_directories.append(directory)
+
+        visible_files = sorted(
+            (
+                file_path
+                for file_path in set(protected_files)
+                if not any(
+                    file_path.is_relative_to(directory)
+                    for directory in visible_directories
+                )
+            ),
+            key=str,
+        )
+
         arguments: list[str] = []
-        for directory in protected_directories:
+        for directory in visible_directories:
             arguments.extend(["--tmpfs", str(directory)])
-        for file_path in protected_files:
+        for file_path in visible_files:
             arguments.extend(["--ro-bind", "/dev/null", str(file_path)])
         return arguments
 

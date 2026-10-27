@@ -39,6 +39,7 @@ Features are actively being developed, so some functionality may be incomplete.
 - `zenity` for the local approval window used by Tier 2 terminal commands.
 - `notify-send` for timer notifications, `xdg-open` for supported file opening,
   and `pactl` for audio output selection.
+- `wpctl` for default-volume control and `playerctl` for media control.
 - `hyprctl` for window listing and focus on Hyprland; these window tools are
   unavailable on other desktop environments.
 
@@ -92,9 +93,16 @@ Existing environments and an existing `.env` file are preserved. If setup report
 Open `.env` in a text editor
 Add your own OpenAI API key and check the model setting. Use the format provided in `.env.example`.
 
+For an installed layout that keeps the Kokoro worker interpreter elsewhere,
+`JARVIS_KOKORO_PYTHON` can point to its executable. If unset, Jarvis uses
+`.venv-kokoro/bin/python` next to the application files.
+
 `TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to an existing `.env` if it is missing, without changing an existing value.
 
 The general terminal command tool is disabled by default in `.env.example`. To enable it locally, set `TERMINAL_COMMANDS_ENABLED=true`. `TERMINAL_WRITE_ROOT` sets the only user directory the sandbox can access; the template uses `~/`. Under the default tier mapping, Tier 1 commands read this directory and Tier 2 commands can write there after approval. The sandbox's `HOME` and `~` resolve to this root. The current development `.env` uses the project directory as its root, so a request for the sandbox home writes there rather than to the host home. Tool results report `access_root` and `sandbox_home` to make the destination explicit.
+
+If terminal access is enabled, the sandbox also hides the active Jarvis memory
+storage paths, even when the configured terminal root contains them.
 
 `TERMINAL_TIER_1_OVERRIDE`, `TERMINAL_TIER_2_OVERRIDE`, and `TERMINAL_TIER_3_OVERRIDE` each accept `1`, `2`, or `3`. They map the classifier's source tier to the effective tier used for approval routing; their defaults (`1`, `2`, `3`) preserve the normal policy. For example, setting `TERMINAL_TIER_3_OVERRIDE=1` runs known high-risk commands without approval. Overrides change approval routing, not execution capabilities: a source Tier 2 or Tier 3 command routed to Tier 1 still runs Fish with write access inside the configured root. Downgrading those tiers can therefore allow writes or deletions there without approval. Tier overrides do not expand the configured filesystem root or add host privileges. Network access cannot be downgraded below Tier 2 approval; a mapping to Tier 3 denies it. Invalid values stop terminal-service startup. Restart Jarvis after changing `.env`. Known credential paths and `.env` files are masked; keep custom secrets outside the configured root.
 
@@ -107,6 +115,9 @@ Run the voice assistant with:
 ```
 
 Speak the wake word, then give Jarvis a command. Press `Ctrl+C` in the terminal to stop it.
+
+Only one Jarvis runtime can run for the current user at a time. A second launch
+reports that Jarvis is already running and exits.
 
 Jarvis prefers a purpose-built tool when one covers the requested action. For
 local facts without a matching tool, it can generate a Tier 1 read-only

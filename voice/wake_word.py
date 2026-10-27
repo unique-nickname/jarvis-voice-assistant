@@ -12,7 +12,7 @@ THRESHOLD = 0.2
 COOLDOWN_SECONDS = 2.0
 BUFFER_SECONDS = 1.0
 
-MODEL_DIR = Path("models/wakeword")
+MODEL_DIR = Path(__file__).resolve().parents[1] / "models" / "wakeword"
 
 model = Model(
     wakeword_model_paths=[str(MODEL_DIR / "jarvis.onnx")],

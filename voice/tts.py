@@ -1,14 +1,49 @@
 
 import json
+import os
+import shutil
 import subprocess
 import threading
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-PYTHON = PROJECT_DIR / ".venv-kokoro" / "bin" / "python"
+DEFAULT_PYTHON = PROJECT_DIR / ".venv-kokoro" / "bin" / "python"
 
 _worker = None
 _lock = threading.Lock()
+
+
+def _kokoro_python() -> Path:
+    """Resolve the worker interpreter independently of the launch directory."""
+    configured = os.environ.get("JARVIS_KOKORO_PYTHON")
+    if not configured:
+        candidate = DEFAULT_PYTHON
+    else:
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute():
+            if os.sep in configured or (os.altsep and os.altsep in configured):
+                candidate = PROJECT_DIR / candidate
+            else:
+                resolved_executable = shutil.which(configured)
+                candidate = (
+                    Path(resolved_executable)
+                    if resolved_executable is not None
+                    else PROJECT_DIR / candidate
+                )
+
+    try:
+        candidate = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise RuntimeError(
+            "Kokoro's Python interpreter is unavailable. Set "
+            "JARVIS_KOKORO_PYTHON or run setup.sh."
+        ) from exc
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise RuntimeError(
+            "Kokoro's Python interpreter is not executable. Set "
+            "JARVIS_KOKORO_PYTHON or run setup.sh."
+        )
+    return candidate
 
 
 def _read_response():
@@ -29,8 +64,9 @@ def initialize():
         if _worker is not None and _worker.poll() is None:
             return
 
+        python_executable = _kokoro_python()
         _worker = subprocess.Popen(
-            [str(PYTHON), "-u", "-m", "voice.tts_worker"],
+            [str(python_executable), "-u", "-m", "voice.tts_worker"],
             cwd=PROJECT_DIR,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

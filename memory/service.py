@@ -206,6 +206,15 @@ class MemoryService:
         self._ensure_open()
         return self
 
+    @property
+    def protected_paths(self) -> tuple[Path, ...]:
+        """Paths the terminal sandbox must hide from arbitrary commands."""
+        return tuple(
+            path
+            for path in (self.data_directory, self.session_file)
+            if path is not None
+        )
+
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
 

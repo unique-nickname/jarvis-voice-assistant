@@ -7,16 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.assistant import AssistantConversation, ask
-from voice.stt import record_audio, transcribe
-from voice.tts import initialize, speak, shutdown
-from voice.wake_word import wait_for_wake_word
-from voice.clip_recorder import ClipRecorder
-from memory import MemoryService
-from terminal.operations import create_terminal_service
-from tools.registry import handlers_for, tools_for
-from tools.scheduled_actions import ScheduledActionService
-from tools.timers import TimerService
+from core.instance_lock import JarvisAlreadyRunningError, JarvisInstanceLock
 
 
 DEFAULT_CONVERSATION_TIMEOUT_SECONDS = 12
@@ -72,6 +63,32 @@ def normalize_voice_command(text: str) -> str:
 
 
 def main():
+    try:
+        instance_lock = JarvisInstanceLock.acquire()
+    except JarvisAlreadyRunningError as exc:
+        print(str(exc))
+        return
+
+    try:
+        _run_assistant()
+    finally:
+        instance_lock.close()
+
+
+def _run_assistant():
+    # Import runtime components only after acquiring the instance lock. Several
+    # voice modules load models or open process-local resources at import time.
+    from core.assistant import AssistantConversation, ask
+    from voice.stt import record_audio, transcribe
+    from voice.tts import initialize, speak, shutdown
+    from voice.wake_word import wait_for_wake_word
+    from voice.clip_recorder import ClipRecorder
+    from memory import MemoryService
+    from terminal.operations import create_terminal_service
+    from tools.registry import handlers_for, tools_for
+    from tools.scheduled_actions import ScheduledActionService
+    from tools.timers import TimerService
+
     memory_service = MemoryService()
     recorder = None
     timer_service = None
@@ -81,7 +98,9 @@ def main():
         followup_timeout = conversation_timeout_seconds()
         timer_service = TimerService()
         recorder = ClipRecorder()
-        terminal_service = create_terminal_service()
+        terminal_service = create_terminal_service(
+            protected_paths=memory_service.protected_paths,
+        )
         scheduled_action_service = ScheduledActionService()
         assistant_tools = tools_for(
             memory_service,

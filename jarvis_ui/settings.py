@@ -63,6 +63,12 @@ CLIP_DEFAULTS = {
     "CLIP_AUDIO": "default_output|default_input",
     "CLIP_DIRECTORY": "~/Videos/Clips",
 }
+VOICE_DEFAULTS = {
+    "JARVIS_TTS_DEVICE": "auto",
+    "JARVIS_TTS_CPU_THREADS": "2",
+    "VOICE_SILENCE_SECONDS": "2.0",
+    "VOICE_MAX_UTTERANCE_SECONDS": "45",
+}
 SECRET_KEY = "OPENAI_API_KEY"
 
 
@@ -210,10 +216,12 @@ class SettingsWindow:
         applications = ttk.Frame(notebook, padding=12)
         terminal = ttk.Frame(notebook, padding=12)
         clips = ttk.Frame(notebook, padding=12)
+        voice = ttk.Frame(notebook, padding=12)
         notebook.add(general, text="General")
         notebook.add(applications, text="Applications")
         notebook.add(terminal, text="Terminal safety")
         notebook.add(clips, text="Clipping")
+        notebook.add(voice, text="Voice")
 
         self._add_fields(general, GENERAL_DEFAULTS, parsed)
         self._add_secret_field(general)
@@ -236,6 +244,39 @@ class SettingsWindow:
             pady=(12, 0),
         )
         self._add_fields(clips, CLIP_DEFAULTS, parsed)
+        self._add_fields(voice, VOICE_DEFAULTS, parsed)
+        ttk.Label(
+            voice,
+            text=(
+                "Automatic TTS uses CUDA when available. Choose CPU to keep "
+                "speech synthesis off the GPU; the CPU thread limit applies "
+                "only when synthesis uses the CPU."
+            ),
+            wraplength=560,
+            style="Muted.TLabel",
+        ).grid(
+            row=len(VOICE_DEFAULTS),
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(10, 4),
+        )
+        ttk.Label(
+            voice,
+            text=(
+                "Recording ends after this much silence, or at the maximum "
+                "utterance length. Longer silence gives you more time to pause "
+                "between phrases."
+            ),
+            wraplength=560,
+            style="Muted.TLabel",
+        ).grid(
+            row=len(VOICE_DEFAULTS) + 1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(4, 0),
+        )
 
         footer = ttk.Frame(content)
         footer.grid(row=3, column=0, sticky="ew", pady=(10, 0))
@@ -258,14 +299,30 @@ class SettingsWindow:
         parsed: dict[str, str | None],
     ) -> None:
         parent.columnconfigure(1, weight=1)
+        labels = {
+            "JARVIS_TTS_DEVICE": "Speech synthesis device",
+            "JARVIS_TTS_CPU_THREADS": "Speech CPU threads",
+            "VOICE_SILENCE_SECONDS": "End recording after silence (seconds)",
+            "VOICE_MAX_UTTERANCE_SECONDS": "Maximum utterance (seconds)",
+        }
         for row, (key, default) in enumerate(defaults.items()):
             value = parsed.get(key)
             variable = tk.StringVar(value=default if value is None else str(value))
             self.variables[key] = variable
-            ttk.Label(parent, text=key.replace("_", " ").title()).grid(
+            ttk.Label(
+                parent,
+                text=labels.get(key, key.replace("_", " ").title()),
+            ).grid(
                 row=row, column=0, sticky="w", padx=(0, 12), pady=5
             )
-            if key == "TERMINAL_COMMANDS_ENABLED":
+            if key == "JARVIS_TTS_DEVICE":
+                ttk.Combobox(
+                    parent,
+                    textvariable=variable,
+                    values=("auto", "cpu", "cuda"),
+                    state="readonly",
+                ).grid(row=row, column=1, sticky="ew", pady=5)
+            elif key == "TERMINAL_COMMANDS_ENABLED":
                 ttk.Checkbutton(
                     parent,
                     text="Allow Jarvis-generated terminal commands",
@@ -466,6 +523,28 @@ class SettingsWindow:
         if not 1 <= timeout <= 120:
             raise ValueError("Conversation timeout must be between 1 and 120 seconds.")
         values["CONVERSATION_TIMEOUT_SECONDS"] = str(timeout)
+        values["JARVIS_TTS_DEVICE"] = values["JARVIS_TTS_DEVICE"].casefold()
+        if values["JARVIS_TTS_DEVICE"] not in {"auto", "cpu", "cuda"}:
+            raise ValueError("TTS device must be auto, cpu, or cuda.")
+        cpu_threads = int(values["JARVIS_TTS_CPU_THREADS"])
+        if not 1 <= cpu_threads <= 32:
+            raise ValueError("TTS CPU threads must be between 1 and 32.")
+        values["JARVIS_TTS_CPU_THREADS"] = str(cpu_threads)
+        for key, minimum, maximum in (
+            ("VOICE_SILENCE_SECONDS", 0.3, 5.0),
+            ("VOICE_MAX_UTTERANCE_SECONDS", 5.0, 180.0),
+        ):
+            try:
+                number = float(values[key])
+            except ValueError as exc:
+                raise ValueError(
+                    f"{key} must be a number from {minimum} to {maximum}."
+                ) from exc
+            if not minimum <= number <= maximum:
+                raise ValueError(
+                    f"{key} must be from {minimum} to {maximum} seconds."
+                )
+            values[key] = str(number)
         if values["STATUS_INDICATOR_ALWAYS_ON_TOP"].casefold() not in {
             "true",
             "false",

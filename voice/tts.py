@@ -79,6 +79,7 @@ def initialize():
             raise RuntimeError(
                 f"Could not initialize Kokoro: {result.get('error')}"
             )
+        print(f"Kokoro ready on {result.get('device', 'unknown device')}.")
 
 
 def speak(text: str) -> bool:

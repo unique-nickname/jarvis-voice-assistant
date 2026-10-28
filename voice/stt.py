@@ -1,4 +1,5 @@
 import collections
+import os
 
 import sounddevice as sd
 import numpy as np
@@ -13,6 +14,29 @@ MIN_RMS_VOLUME = 200
 MIN_SPEECH_FRAMES = 1
 
 MODEL_SIZE = "base"
+DEFAULT_SILENCE_SECONDS = 2.0
+DEFAULT_MAX_SECONDS = 45.0
+
+
+def _recording_limit(
+    name: str,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be a number from {minimum} to {maximum}."
+        ) from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be a number from {minimum} to {maximum}.")
+    return value
+
 
 model = WhisperModel(
     MODEL_SIZE,
@@ -23,8 +47,8 @@ vad = webrtcvad.Vad(2)
 
 
 def record_audio(
-    silence_seconds: float = 1.2,
-    max_seconds: float = 20.0,
+    silence_seconds: float | None = None,
+    max_seconds: float | None = None,
     speech_start_timeout_seconds: float = 8.0,
     initial_audio: np.ndarray | None = None,
 ) -> np.ndarray:
@@ -33,6 +57,15 @@ def record_audio(
     If no speech is detected before ``speech_start_timeout_seconds``, return
     an empty audio array.
     """
+    if silence_seconds is None:
+        silence_seconds = _recording_limit(
+            "VOICE_SILENCE_SECONDS", DEFAULT_SILENCE_SECONDS, 0.3, 5.0
+        )
+    if max_seconds is None:
+        max_seconds = _recording_limit(
+            "VOICE_MAX_UTTERANCE_SECONDS", DEFAULT_MAX_SECONDS, 5.0, 180.0
+        )
+
     frames = []
     trailing_silence = collections.deque()
     pending_speech = collections.deque()

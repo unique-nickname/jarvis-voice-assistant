@@ -104,6 +104,8 @@ user-only file permissions, and applies changes the next time Jarvis starts.
 The **Applications** tab edits the friendly names and single executable paths
 that the `open_application` tool may launch. It does not accept shell commands
 or executable arguments. The **General** tab selects the dark or light UI theme.
+The **Voice** tab controls Kokoro's compute device and the microphone's silence
+and utterance limits.
 
 Configuration is read from `JARVIS_CONFIG_FILE` when that absolute path is set,
 otherwise from `~/.config/jarvis/.env` if it exists, then from the project
@@ -113,6 +115,18 @@ otherwise from `~/.config/jarvis/.env` if it exists, then from the project
 For an installed layout that keeps the Kokoro worker interpreter elsewhere,
 `JARVIS_KOKORO_PYTHON` can point to its executable. If unset, Jarvis uses
 `.venv-kokoro/bin/python` next to the application files.
+
+`JARVIS_TTS_DEVICE` accepts `auto`, `cpu`, or `cuda`. `auto` lets Kokoro use
+CUDA when PyTorch reports it is available; choose `cpu` to keep synthesis off
+the GPU while gaming. `JARVIS_TTS_CPU_THREADS` limits PyTorch CPU threads when
+the selected device is CPU (default: two). Jarvis reports the selected device
+at startup. TTS audio uses a bounded chunk queue, so playback can begin before
+the complete response has been synthesized.
+
+`VOICE_SILENCE_SECONDS` controls how much silence ends an utterance (default:
+two seconds, allowed range: 0.3 to 5). `VOICE_MAX_UTTERANCE_SECONDS` is the
+hard recording limit for one utterance (default: 45 seconds, allowed range: 5
+to 180). Both can be changed in the **Voice** settings tab or in `.env`.
 
 `TERMINAL_APPROVAL_FLOATING` controls the approval window layout. It accepts `auto`, `always`, or `never`; `auto` is the default and detects Hyprland when available. Setup adds this setting to the selected configuration if it is missing, without changing an existing value.
 
@@ -289,13 +303,18 @@ terminal policy. Pending actions can be listed or cancelled, and every pending
 action is cancelled when Jarvis shuts down; the queue does not persist across
 restarts.
 
-After a response, Jarvis listens for a follow-up only when it has a meaningful
-question or needs your answer to continue the current interaction. It does not
-add a generic "anything else" prompt to every response. The listening window
-defaults to 12 seconds and can be changed with `CONVERSATION_TIMEOUT_SECONDS`
-in `.env` (whole numbers from 1 to 120). When the window expires, Jarvis clears
-that conversation context and returns to wake-word listening. A conversation
-also ends after 20 user turns to keep its context bounded.
+After a response, Jarvis listens for a follow-up when it invites a relevant
+continuation. It does not add a generic "anything else" prompt to every
+response. The follow-up listening window defaults to 12 seconds and can be
+changed with `CONVERSATION_TIMEOUT_SECONDS` in `.env` (whole numbers from 1 to
+120). When the window expires, Jarvis clears that conversation context and
+returns to wake-word listening. A conversation also ends after 20 user turns to
+keep its context bounded.
+
+During a command, Jarvis ends recording after two seconds of silence by
+default, or after 45 seconds even if speech continues. Change these limits with
+`VOICE_SILENCE_SECONDS` and `VOICE_MAX_UTTERANCE_SECONDS` if you need longer
+pauses or longer requests.
 
 ## Troubleshooting
 

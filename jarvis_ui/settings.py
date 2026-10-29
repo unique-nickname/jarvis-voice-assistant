@@ -53,6 +53,39 @@ TERMINAL_DEFAULTS = {
     "TERMINAL_TIER_2_OVERRIDE": "2",
     "TERMINAL_TIER_3_OVERRIDE": "3",
 }
+TIER_POLICY_LABEL_TO_VALUE = {
+    "No approval": "1",
+    "Always require approval": "2",
+    "Automatically deny": "3",
+}
+TIER_POLICY_VALUE_TO_LABEL = {
+    value: label for label, value in TIER_POLICY_LABEL_TO_VALUE.items()
+}
+TIER_OVERRIDE_LABELS = {
+    "TERMINAL_TIER_1_OVERRIDE": "Tier 1 commands",
+    "TERMINAL_TIER_2_OVERRIDE": "Tier 2 commands",
+    "TERMINAL_TIER_3_OVERRIDE": "Tier 3 commands",
+}
+TIER_OVERRIDE_HELP = {
+    "TERMINAL_TIER_1_OVERRIDE": (
+        "Tier 1 is a narrow set of recognized read-only diagnostics, such as "
+        "listing files or checking system state. This choice controls how "
+        "commands classified as Tier 1 are routed."
+    ),
+    "TERMINAL_TIER_2_OVERRIDE": (
+        "Tier 2 includes requested changes and commands Jarvis does not "
+        "recognize. It normally requires your approval each time. Routing it "
+        "to No approval allows those commands to run without a prompt inside "
+        "the configured sandbox root."
+    ),
+    "TERMINAL_TIER_3_OVERRIDE": (
+        "Tier 3 includes high-risk commands such as deletion or privilege "
+        "escalation, and is denied by default. Routing it to an approval or "
+        "no-approval policy overrides that default; no-approval can allow "
+        "destructive commands inside the configured sandbox root."
+    ),
+}
+TIER_OVERRIDE_KEYS = frozenset(TIER_OVERRIDE_LABELS)
 CLIP_DEFAULTS = {
     "CLIP_MONITOR": "DP-1",
     "CLIP_DURATION": "60",
@@ -60,9 +93,16 @@ CLIP_DEFAULTS = {
     "CLIP_QUALITY": "very_high",
     "CLIP_CODEC": "h264",
     "CLIP_FORMAT": "mp4",
-    "CLIP_AUDIO": "default_output|default_input",
+    "CLIP_SYSTEM_AUDIO": "true",
+    "CLIP_AUDIO": "",
     "CLIP_DIRECTORY": "~/Videos/Clips",
 }
+NO_MICROPHONE_LABEL = "No microphone"
+CLIP_AUDIO_LABEL_TO_VALUE = {
+    NO_MICROPHONE_LABEL: "",
+    "Default microphone": "default_input",
+}
+CUSTOM_CLIP_AUDIO_LABEL = "Saved microphone (not currently detected)"
 VOICE_DEFAULTS = {
     "JARVIS_TTS_DEVICE": "auto",
     "JARVIS_TTS_CPU_THREADS": "2",
@@ -104,6 +144,139 @@ def _available_hyprland_monitors() -> tuple[str, ...]:
         for monitor in monitors
         if isinstance(monitor, dict) and isinstance(monitor.get("name"), str)
     )
+
+
+def _available_clipping_microphones() -> dict[str, str]:
+    pulse_sources: set[str] | None = None
+    pactl = shutil.which("pactl")
+    if pactl is not None:
+        try:
+            pulse_result = subprocess.run(
+                [pactl, "list", "short", "sources"],
+                capture_output=True,
+                text=True,
+                check=False,
+                close_fds=True,
+                timeout=2.0,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pulse_result = None
+        if pulse_result is not None and pulse_result.returncode == 0:
+            pulse_sources = {
+                fields[1]
+                for line in pulse_result.stdout.splitlines()
+                if len(fields := line.split()) >= 2
+                and not fields[1].casefold().endswith(".monitor")
+            }
+
+    executable = shutil.which("gpu-screen-recorder")
+    if executable is None:
+        return {}
+    try:
+        result = subprocess.run(
+            [executable, "--list-audio-devices"],
+            capture_output=True,
+            text=True,
+            check=False,
+            close_fds=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if result.returncode != 0:
+        return {}
+
+    choices: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        source_name, separator, description = line.partition("|")
+        source_name = source_name.strip()
+        description = description.strip()
+        if not separator or not source_name:
+            continue
+        if source_name == "default_input":
+            continue
+        device_name = source_name.removeprefix("device:")
+        device_description = description or device_name
+        if pulse_sources is not None and device_name not in pulse_sources:
+            continue
+        if (
+            source_name == "default_output"
+            or device_name.casefold().endswith(".monitor")
+            or "monitor" in device_description.casefold()
+            or "output" in device_description.casefold()
+        ):
+            continue
+        label = f"Microphone: {device_description}"
+        if label in choices:
+            label = f"{label} ({device_name})"
+        choices[label] = f"device:{device_name}"
+    return choices
+
+
+def _available_clipping_applications() -> tuple[str, ...]:
+    executable = shutil.which("gpu-screen-recorder")
+    if executable is None:
+        return ()
+    try:
+        result = subprocess.run(
+            [executable, "--list-application-audio"],
+            capture_output=True,
+            text=True,
+            check=False,
+            close_fds=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    if result.returncode != 0:
+        return ()
+
+    applications = {}
+    for line in result.stdout.splitlines():
+        name = line.partition("|")[0].strip()
+        if name.startswith("app:"):
+            name = name.removeprefix("app:").strip()
+        if (
+            not name
+            or len(name) > 200
+            or any(character in name for character in "\0\r\n|,")
+        ):
+            continue
+        applications.setdefault(name.casefold(), name)
+    return tuple(sorted(applications.values(), key=str.casefold))
+
+
+def _parse_clipping_app_exclusions(raw_value: str | None) -> tuple[str, ...]:
+    if not raw_value:
+        return ()
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    values = {}
+    for item in parsed:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if (
+            not name
+            or len(name) > 200
+            or any(character in name for character in "\0\r\n|,")
+        ):
+            continue
+        values.setdefault(name.casefold(), name)
+    return tuple(values.values())
+
+
+def _configured_microphone_source(raw_value: str | None) -> str:
+    if not raw_value:
+        return ""
+    for source in (part.strip() for part in raw_value.split("|")):
+        if source == "default_input" or source.startswith("device:"):
+            return source
+    return ""
 
 
 def _private_configuration_directory(directory: Path) -> None:
@@ -172,6 +345,7 @@ class SettingsWindow:
         self.variables: dict[str, tk.StringVar] = {}
         self.clear_api_key = tk.BooleanVar(value=False)
         self.api_key_configured = False
+        self.clip_app_vars: dict[str, tk.BooleanVar] = {}
 
         try:
             self.config_path = configuration_file()
@@ -181,6 +355,26 @@ class SettingsWindow:
             parsed = {}
             self.config_path = Path(".env")
 
+        self.original_clip_audio = _configured_microphone_source(
+            parsed.get("CLIP_AUDIO")
+        )
+        self.clip_audio_options = {
+            **CLIP_AUDIO_LABEL_TO_VALUE,
+            **_available_clipping_microphones(),
+        }
+        if self.original_clip_audio and self.original_clip_audio not in set(
+            self.clip_audio_options.values()
+        ):
+            self.clip_audio_options[CUSTOM_CLIP_AUDIO_LABEL] = (
+                self.original_clip_audio
+            )
+        self.clip_audio_value_to_label = {
+            value: label for label, value in self.clip_audio_options.items()
+        }
+        self.clip_audio_exclusions = _parse_clipping_app_exclusions(
+            parsed.get("CLIP_AUDIO_EXCLUDE_APPS")
+        )
+        self.clip_audio_app_names = _available_clipping_applications()
         theme = str(parsed.get("JARVIS_UI_THEME") or "dark").casefold()
         self.palette = apply_theme(self.root, theme)
         self.api_key_configured = bool(parsed.get(SECRET_KEY))
@@ -244,6 +438,7 @@ class SettingsWindow:
             pady=(12, 0),
         )
         self._add_fields(clips, CLIP_DEFAULTS, parsed)
+        self._add_clipping_app_exclusions(clips)
         self._add_fields(voice, VOICE_DEFAULTS, parsed)
         ttk.Label(
             voice,
@@ -304,18 +499,79 @@ class SettingsWindow:
             "JARVIS_TTS_CPU_THREADS": "Speech CPU threads",
             "VOICE_SILENCE_SECONDS": "End recording after silence (seconds)",
             "VOICE_MAX_UTTERANCE_SECONDS": "Maximum utterance (seconds)",
+            "CLIP_SYSTEM_AUDIO": "System audio",
+            "CLIP_AUDIO": "Microphone",
         }
         for row, (key, default) in enumerate(defaults.items()):
             value = parsed.get(key)
-            variable = tk.StringVar(value=default if value is None else str(value))
+            stored_value = default if value is None else str(value)
+            if key in TIER_OVERRIDE_KEYS:
+                value = TIER_POLICY_VALUE_TO_LABEL.get(
+                    stored_value,
+                    TIER_POLICY_VALUE_TO_LABEL[default],
+                )
+            elif key == "CLIP_AUDIO":
+                microphone = _configured_microphone_source(stored_value)
+                value = self.clip_audio_value_to_label.get(
+                    microphone,
+                    NO_MICROPHONE_LABEL,
+                )
+            else:
+                value = stored_value
+            variable = tk.StringVar(value=value)
             self.variables[key] = variable
-            ttk.Label(
-                parent,
-                text=labels.get(key, key.replace("_", " ").title()),
-            ).grid(
+            label_text = TIER_OVERRIDE_LABELS.get(
+                key,
+                labels.get(key, key.replace("_", " ").title()),
+            )
+            if key in TIER_OVERRIDE_KEYS:
+                label_group = ttk.Frame(parent)
+                label_group.grid(
+                    row=row,
+                    column=0,
+                    sticky="w",
+                    padx=(0, 12),
+                    pady=5,
+                )
+                ttk.Label(label_group, text=label_text).pack(side="left")
+                help_icon = ttk.Label(
+                    label_group,
+                    text="?",
+                    foreground=self.palette["accent"],
+                    cursor="question_arrow",
+                    takefocus=True,
+                    padding=(4, 2),
+                )
+                help_icon.pack(side="left", padx=(4, 0))
+                self._add_hover_tooltip(help_icon, TIER_OVERRIDE_HELP[key])
+                ttk.Combobox(
+                    parent,
+                    textvariable=variable,
+                    values=tuple(TIER_POLICY_LABEL_TO_VALUE),
+                    state="readonly",
+                    width=28,
+                ).grid(row=row, column=1, sticky="ew", pady=5)
+                continue
+
+            ttk.Label(parent, text=label_text).grid(
                 row=row, column=0, sticky="w", padx=(0, 12), pady=5
             )
-            if key == "JARVIS_TTS_DEVICE":
+            if key == "CLIP_SYSTEM_AUDIO":
+                ttk.Checkbutton(
+                    parent,
+                    text="Enabled",
+                    variable=variable,
+                    onvalue="true",
+                    offvalue="false",
+                ).grid(row=row, column=1, sticky="w", pady=5)
+            elif key == "CLIP_AUDIO":
+                ttk.Combobox(
+                    parent,
+                    textvariable=variable,
+                    values=tuple(self.clip_audio_options),
+                    state="readonly",
+                ).grid(row=row, column=1, sticky="ew", pady=5)
+            elif key == "JARVIS_TTS_DEVICE":
                 ttk.Combobox(
                     parent,
                     textvariable=variable,
@@ -365,6 +621,176 @@ class SettingsWindow:
                 ttk.Entry(parent, textvariable=variable).grid(
                     row=row, column=1, sticky="ew", pady=5
                 )
+
+    def _add_clipping_app_exclusions(self, parent: ttk.Frame) -> None:
+        row = len(CLIP_DEFAULTS)
+        parent.rowconfigure(row, weight=1)
+        section = ttk.LabelFrame(
+            parent,
+            text="Application audio exclusions",
+            padding=8,
+        )
+        section.grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            pady=(8, 0),
+        )
+        section.columnconfigure(0, weight=1)
+        ttk.Label(
+            section,
+            text=(
+                "Check apps to exclude their audio. With system audio enabled, "
+                "any checked app switches capture to per-app audio. App audio "
+                "requires PipeWire and may omit desktop sounds not exposed as "
+                "app audio. Turn off system audio to record no desktop or app "
+                "audio."
+            ),
+            wraplength=560,
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Button(
+            section,
+            text="Refresh app list",
+            command=self._refresh_clipping_applications,
+        ).grid(row=0, column=1, sticky="e", padx=(8, 0))
+
+        list_frame = ttk.Frame(section)
+        list_frame.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            pady=(6, 0),
+        )
+        section.rowconfigure(1, weight=1)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        self.clip_apps_canvas = tk.Canvas(
+            list_frame,
+            height=112,
+            highlightthickness=0,
+            background=self.palette["surface"],
+        )
+        self.clip_apps_canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(
+            list_frame,
+            orient="vertical",
+            command=self.clip_apps_canvas.yview,
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.clip_apps_canvas.configure(yscrollcommand=scrollbar.set)
+        self.clip_apps_inner = ttk.Frame(self.clip_apps_canvas)
+        self.clip_apps_window = self.clip_apps_canvas.create_window(
+            (0, 0),
+            window=self.clip_apps_inner,
+            anchor="nw",
+        )
+        self.clip_apps_inner.bind(
+            "<Configure>",
+            lambda _event: self.clip_apps_canvas.configure(
+                scrollregion=self.clip_apps_canvas.bbox("all")
+            ),
+        )
+        self.clip_apps_canvas.bind(
+            "<Configure>",
+            lambda event: self.clip_apps_canvas.itemconfigure(
+                self.clip_apps_window,
+                width=event.width,
+            ),
+        )
+        self._render_clipping_applications()
+
+    def _render_clipping_applications(self) -> None:
+        for child in self.clip_apps_inner.winfo_children():
+            child.destroy()
+        self.clip_app_vars.clear()
+
+        current_names = list(self.clip_audio_app_names)
+        current_keys = {name.casefold() for name in current_names}
+        stale_exclusions = [
+            name
+            for name in self.clip_audio_exclusions
+            if name.casefold() not in current_keys
+        ]
+        names = current_names + stale_exclusions
+        if not names:
+            ttk.Label(
+                self.clip_apps_inner,
+                text=(
+                    "No app audio streams detected. Open an app and start "
+                    "audio, then refresh the list."
+                ),
+                style="Muted.TLabel",
+            ).grid(row=0, column=0, sticky="w", padx=4, pady=4)
+            return
+
+        excluded = {name.casefold() for name in self.clip_audio_exclusions}
+        for app_row, name in enumerate(names):
+            variable = tk.BooleanVar(value=name.casefold() in excluded)
+            self.clip_app_vars[name] = variable
+            label = name
+            if name.casefold() not in current_keys:
+                label = f"{name} (not currently detected)"
+            ttk.Checkbutton(
+                self.clip_apps_inner,
+                text=label,
+                variable=variable,
+                onvalue=True,
+                offvalue=False,
+            ).grid(row=app_row, column=0, sticky="w", padx=4, pady=1)
+
+    def _refresh_clipping_applications(self) -> None:
+        self.clip_audio_exclusions = tuple(
+            name
+            for name, variable in self.clip_app_vars.items()
+            if variable.get()
+        )
+        self.clip_audio_app_names = _available_clipping_applications()
+        self._render_clipping_applications()
+
+    def _add_hover_tooltip(self, widget, text: str) -> None:
+        popup_window = None
+
+        def hide(_event=None):
+            nonlocal popup_window
+            if popup_window is not None:
+                try:
+                    popup_window.destroy()
+                except tk.TclError:
+                    pass
+                popup_window = None
+
+        def show(_event=None):
+            nonlocal popup_window
+            if popup_window is not None:
+                return
+            popup_window = tk.Toplevel(self.root)
+            popup_window.wm_overrideredirect(True)
+            popup_window.configure(background=self.palette["border"])
+            ttk_label = tk.Label(
+                popup_window,
+                text=text,
+                justify="left",
+                wraplength=360,
+                padx=9,
+                pady=7,
+                background=self.palette["surface_alt"],
+                foreground=self.palette["foreground"],
+                font=("TkDefaultFont", 10),
+            )
+            ttk_label.pack(padx=1, pady=1)
+            popup_window.update_idletasks()
+            x = widget.winfo_rootx() + widget.winfo_width() + 5
+            y = widget.winfo_rooty()
+            popup_window.wm_geometry(f"+{x}+{y}")
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+        widget.bind("<FocusIn>", show)
+        widget.bind("<FocusOut>", hide)
+        widget.bind("<ButtonPress-1>", show)
 
     def _add_application_allowlist(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -600,24 +1026,42 @@ class SettingsWindow:
             "TERMINAL_TIER_2_OVERRIDE",
             "TERMINAL_TIER_3_OVERRIDE",
         ):
-            if values[key] not in {"1", "2", "3"}:
-                raise ValueError(f"{key} must be 1, 2, or 3.")
+            policy_value = TIER_POLICY_LABEL_TO_VALUE.get(values[key])
+            if policy_value is None:
+                raise ValueError(f"Choose a valid approval policy for {key}.")
+            values[key] = policy_value
 
         for key in ("CLIP_DURATION", "CLIP_FPS"):
             number = int(values[key])
             if number < 1:
                 raise ValueError(f"{key} must be a positive whole number.")
             values[key] = str(number)
+        values["CLIP_SYSTEM_AUDIO"] = values["CLIP_SYSTEM_AUDIO"].casefold()
+        if values["CLIP_SYSTEM_AUDIO"] not in {"true", "false"}:
+            raise ValueError("System audio setting must be true or false.")
         for key in (
             "CLIP_MONITOR",
             "CLIP_QUALITY",
             "CLIP_CODEC",
             "CLIP_FORMAT",
-            "CLIP_AUDIO",
             "CLIP_DIRECTORY",
         ):
             if not values[key]:
                 raise ValueError(f"{key} cannot be empty.")
+        selected_clip_audio = values["CLIP_AUDIO"]
+        if selected_clip_audio in self.clip_audio_options:
+            values["CLIP_AUDIO"] = self.clip_audio_options[selected_clip_audio]
+        else:
+            raise ValueError("Choose a valid microphone option.")
+        values["CLIP_AUDIO_EXCLUDE_APPS"] = json.dumps(
+            [
+                name
+                for name, variable in self.clip_app_vars.items()
+                if variable.get()
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         values[APPLICATION_ALLOWLIST_ENV] = json.dumps(
             self._parse_application_editor(),
             ensure_ascii=False,

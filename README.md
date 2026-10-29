@@ -105,7 +105,13 @@ The **Applications** tab edits the friendly names and single executable paths
 that the `open_application` tool may launch. It does not accept shell commands
 or executable arguments. The **General** tab selects the dark or light UI theme.
 The **Voice** tab controls Kokoro's compute device and the microphone's silence
-and utterance limits.
+and utterance limits. In **Clipping**, system audio is enabled by default and
+the microphone dropdown selects no microphone, the default microphone, or a
+detected input device. The app list can be refreshed and selected apps excluded.
+When any app is excluded, GPU Screen Recorder switches from mixed system-output
+capture to per-app capture and records all app audio except the selected apps;
+this mode requires PipeWire. Turning off system audio disables desktop and app
+audio while leaving the selected microphone available.
 
 Configuration is read from `JARVIS_CONFIG_FILE` when that absolute path is set,
 otherwise from `~/.config/jarvis/.env` if it exists, then from the project
@@ -135,7 +141,19 @@ The general terminal command tool is disabled by default in `.env.example`. To e
 If terminal access is enabled, the sandbox also hides the active Jarvis memory
 storage paths, even when the configured terminal root contains them.
 
-`TERMINAL_TIER_1_OVERRIDE`, `TERMINAL_TIER_2_OVERRIDE`, and `TERMINAL_TIER_3_OVERRIDE` each accept `1`, `2`, or `3`. They map the classifier's source tier to the effective tier used for approval routing; their defaults (`1`, `2`, `3`) preserve the normal policy. For example, setting `TERMINAL_TIER_3_OVERRIDE=1` runs known high-risk commands without approval. Overrides change approval routing, not execution capabilities: a source Tier 2 or Tier 3 command routed to Tier 1 still runs Fish with write access inside the configured root. Downgrading those tiers can therefore allow writes or deletions there without approval. Tier overrides do not expand the configured filesystem root or add host privileges. Network access cannot be downgraded below Tier 2 approval; a mapping to Tier 3 denies it. Invalid values stop terminal-service startup. Restart Jarvis after changing `.env`. Known credential paths and `.env` files are masked; keep custom secrets outside the configured root.
+The Terminal safety tab presents the three routing choices as **No approval**,
+**Always require approval**, and **Automatically deny**. The corresponding
+`TERMINAL_TIER_1_OVERRIDE`, `TERMINAL_TIER_2_OVERRIDE`, and
+`TERMINAL_TIER_3_OVERRIDE` settings still store `1`, `2`, or `3`. They map the
+classifier's source tier to the effective approval route; defaults (`1`, `2`,
+`3`) preserve the normal policy. Routing Tier 2 or Tier 3 to **No approval**
+lets commands run without a prompt with write access inside the configured
+terminal root. Routing Tier 3 to **Always require approval** makes a command
+eligible to run after approval. Tier overrides do not expand the filesystem
+root or grant host privileges. Network access cannot be downgraded below Tier 2
+approval; a mapping to Tier 3 denies it. Invalid values stop terminal-service
+startup. Restart Jarvis after changing `.env`. Known credential paths and
+`.env` files are masked; keep custom secrets outside the configured root.
 
 ### 5. Start Jarvis
 

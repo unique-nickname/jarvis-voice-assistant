@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import signal
@@ -25,10 +26,76 @@ class ClipRecorder:
         self.quality = os.getenv("CLIP_QUALITY", "very_high")
         self.codec = os.getenv("CLIP_CODEC", "h264")
         self.container = os.getenv("CLIP_FORMAT", "mp4")
-        self.audio = os.getenv(
-            "CLIP_AUDIO",
-            "default_output|default_input",
-        )
+        self.audio_configuration_error: str | None = None
+        raw_system_audio = os.getenv("CLIP_SYSTEM_AUDIO", "true").strip().casefold()
+        if raw_system_audio in {"true", "1", "yes", "on"}:
+            self.system_audio = True
+        elif raw_system_audio in {"false", "0", "no", "off"}:
+            self.system_audio = False
+        else:
+            self.system_audio = False
+            self.audio_configuration_error = (
+                "CLIP_SYSTEM_AUDIO must be true or false."
+            )
+
+        configured_audio = os.getenv("CLIP_AUDIO", "")
+        audio_parts = [part.strip() for part in configured_audio.split("|")]
+        microphone_sources = [
+            source
+            for source in audio_parts
+            if source == "default_input" or source.startswith("device:")
+        ]
+        invalid_audio_parts = [
+            source
+            for source in audio_parts
+            if source
+            and source != "default_output"
+            and source not in microphone_sources
+        ]
+        if invalid_audio_parts:
+            self.audio_configuration_error = (
+                "CLIP_AUDIO must select a microphone input source."
+            )
+        self.microphone = microphone_sources[0] if microphone_sources else ""
+        if len(set(microphone_sources)) > 1:
+            self.audio_configuration_error = (
+                "CLIP_AUDIO can select only one microphone."
+            )
+        if any(
+            source == "device:"
+            or any(character in source for character in "\0\r\n,")
+            for source in microphone_sources
+        ):
+            self.audio_configuration_error = "CLIP_AUDIO contains an invalid source."
+
+        raw_exclusions = os.getenv("CLIP_AUDIO_EXCLUDE_APPS", "[]")
+        try:
+            exclusions = json.loads(raw_exclusions)
+        except json.JSONDecodeError:
+            exclusions = None
+        if not isinstance(exclusions, list):
+            self.excluded_apps = ()
+            self.audio_configuration_error = (
+                "CLIP_AUDIO_EXCLUDE_APPS must be a JSON list of app names."
+            )
+        else:
+            safe_exclusions = []
+            for name in exclusions:
+                if (
+                    not isinstance(name, str)
+                    or not name.strip()
+                    or len(name) > 200
+                    or any(character in name for character in "\0\r\n|,")
+                ):
+                    self.audio_configuration_error = (
+                        "CLIP_AUDIO_EXCLUDE_APPS contains an invalid app name."
+                    )
+                    continue
+                if name.casefold() not in {
+                    existing.casefold() for existing in safe_exclusions
+                }:
+                    safe_exclusions.append(name.strip())
+            self.excluded_apps = tuple(safe_exclusions)
 
         self.output_dir = Path(
             os.path.expandvars(
@@ -96,6 +163,10 @@ class ClipRecorder:
             self.process = None
             self.owns_process = False
 
+        if self.audio_configuration_error is not None:
+            print(f"Clipping unavailable: {self.audio_configuration_error}")
+            return False
+
         existing = self._find_recorder_pids()
 
         if existing:
@@ -130,11 +201,23 @@ class ClipRecorder:
                 "-c", self.container,
                 "-f", str(self.fps),
                 "-r", str(self.duration),
-                "-a", self.audio,
+            ]
+            audio_sources = []
+            if self.system_audio:
+                if self.excluded_apps:
+                    app_names = ",".join(self.excluded_apps)
+                    audio_sources.append(f"app-inverse:{app_names}")
+                else:
+                    audio_sources.append("default_output")
+            if self.microphone:
+                audio_sources.append(self.microphone)
+            if audio_sources:
+                command.extend(["-a", "|".join(audio_sources)])
+            command.extend([
                 "-k", self.codec,
                 "-q", self.quality,
                 "-o", str(self.output_dir),
-            ]
+            ])
 
             self.process = subprocess.Popen(
                 command,

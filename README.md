@@ -39,7 +39,8 @@ Features are actively being developed, so some functionality may be incomplete.
 - Fish for the general terminal command tool.
 - `zenity` for the local approval window used by Tier 2 terminal commands.
 - `notify-send` for timer notifications, `xdg-open` for supported file opening,
-  and `pactl` for audio output selection.
+  and `libpulse` for `pactl` audio device listing and output selection. `parec` is needed
+  only when selecting a PipeWire/PulseAudio source for wake-word detection.
 - `wpctl` for default-volume control and `playerctl` for media control.
 - `hyprctl` for window listing and focus on Hyprland; these window tools are
   unavailable on other desktop environments.
@@ -58,7 +59,7 @@ cd jarvis
 On Arch Linux:
 
 ```bash
-sudo pacman -S python portaudio espeak-ng git fish tk
+sudo pacman -S python portaudio espeak-ng git fish tk libpulse
 ```
 
 For the sandboxed terminal tool and approval window, install their system tools as well:
@@ -107,8 +108,18 @@ or executable arguments. The **General** tab selects the dark or light UI theme
 and sets the maximum tool calls per user request (default 20, configurable from
 1 to 100). The assistant also retains a separate internal limit of five tool
 rounds for a normal request and six for a conversational turn.
-The **Voice** tab controls Kokoro's compute device and the microphone's silence
-and utterance limits. In **Clipping**, system audio is enabled by default and
+The **Voice** tab selects the microphone used for wake-word detection and sets
+its minimum OpenWakeWord score (1–100%; default 20%). This score is not a
+calibrated probability: lower thresholds are more sensitive but may cause more
+false wakes, while higher thresholds may miss the wake word. The selected
+wake-word microphone is independent of the command-recording input. PipeWire/
+PulseAudio sources use `parec` to capture at the detector's 16 kHz mono format,
+so virtual microphones such as EasyEffects can be used without the PortAudio
+JACK backend. The Voice tab also controls Kokoro's compute device and the
+command microphone's silence
+and utterance limits. If a selected wake-word device rejects 16 kHz capture,
+Jarvis captures at that device's default rate and resamples for the detector.
+In **Clipping**, system audio is enabled by default and
 the microphone dropdown selects no microphone, the default microphone, or a
 detected input device. The app list can be refreshed and selected apps excluded.
 When any app is excluded, GPU Screen Recorder switches from mixed system-output

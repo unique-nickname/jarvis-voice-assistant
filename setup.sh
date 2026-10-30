@@ -47,6 +47,7 @@ check_optional_command() {
 
 check_optional_command hyprctl "Hyprland window listing and focus tools"
 check_optional_command pactl "audio output listing and selection tools"
+check_optional_command parec "PipeWire/PulseAudio wake-word microphone selection"
 check_optional_command wpctl "default audio volume controls"
 check_optional_command playerctl "media playback controls"
 check_optional_command xdg-open "opening supported files in desktop applications"

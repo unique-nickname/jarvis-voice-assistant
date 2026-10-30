@@ -105,11 +105,15 @@ CLIP_AUDIO_LABEL_TO_VALUE = {
 }
 CUSTOM_CLIP_AUDIO_LABEL = "Saved microphone (not currently detected)"
 VOICE_DEFAULTS = {
+    "WAKE_WORD_INPUT_DEVICE": "",
+    "WAKE_WORD_THRESHOLD_PERCENT": "20",
     "JARVIS_TTS_DEVICE": "auto",
     "JARVIS_TTS_CPU_THREADS": "2",
     "VOICE_SILENCE_SECONDS": "2.0",
     "VOICE_MAX_UTTERANCE_SECONDS": "45",
 }
+DEFAULT_WAKE_WORD_MICROPHONE_LABEL = "System default microphone"
+CUSTOM_WAKE_WORD_MICROPHONE_LABEL = "Saved microphone (not currently detected)"
 SECRET_KEY = "OPENAI_API_KEY"
 
 
@@ -211,6 +215,103 @@ def _available_clipping_microphones() -> dict[str, str]:
         if label in choices:
             label = f"{label} ({device_name})"
         choices[label] = f"device:{device_name}"
+    return choices
+
+
+def _available_wake_word_microphones() -> dict[str, str]:
+    """Return PortAudio input devices keyed by a readable name and host API."""
+    try:
+        import sounddevice as sd
+
+        devices = sd.query_devices()
+        host_apis = sd.query_hostapis()
+    except Exception:
+        return {}
+
+    choices: dict[str, str] = {}
+    for index, device in enumerate(devices):
+        if int(device.get("max_input_channels", 0)) <= 0:
+            continue
+        name = str(device.get("name", "")).strip()
+        host_api_index = device.get("hostapi")
+        if not name or not isinstance(host_api_index, int):
+            continue
+        if "monitor" in name.casefold() or "loopback" in name.casefold():
+            continue
+        try:
+            host_api = str(host_apis[host_api_index]["name"])
+        except (IndexError, KeyError, TypeError):
+            continue
+        label = f"{name} ({host_api})"
+        if label in choices:
+            label = f"{label} [{index}]"
+        choices[label] = json.dumps(
+            {"index": index, "name": name, "host_api": host_api},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    return choices
+
+
+def _available_pulse_wake_word_sources() -> dict[str, str]:
+    """Return PipeWire/PulseAudio capture sources for the wake-word listener."""
+    pactl = shutil.which("pactl")
+    if pactl is None:
+        return {}
+    try:
+        result = subprocess.run(
+            [pactl, "-f", "json", "list", "sources"],
+            capture_output=True,
+            text=True,
+            check=False,
+            close_fds=True,
+            timeout=2.0,
+        )
+        if result.returncode != 0:
+            return {}
+        sources = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return {}
+    if not isinstance(sources, list):
+        return {}
+
+    choices: dict[str, str] = {}
+    for source_info in sources:
+        if not isinstance(source_info, dict):
+            continue
+        source_name = source_info.get("name")
+        description = source_info.get("description")
+        if not isinstance(source_name, str) or not source_name.strip():
+            continue
+        source_name = source_name.strip()
+        if any(character in source_name for character in "\0\r\n"):
+            continue
+        properties = source_info.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+        if (
+            source_name.casefold().endswith(".monitor")
+            or source_info.get("monitor_source")
+            or str(properties.get("device.class", "")).casefold() == "monitor"
+        ):
+            continue
+        description = (
+            description.strip()
+            if isinstance(description, str) and description.strip()
+            else source_name
+        )
+        label = f"PipeWire source: {description}"
+        if label in choices:
+            label = f"{label} ({source_name})"
+        choices[label] = json.dumps(
+            {
+                "backend": "pulse",
+                "source": source_name,
+                "name": description,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     return choices
 
 
@@ -359,6 +460,28 @@ class SettingsWindow:
         self.original_clip_audio = _configured_microphone_source(
             parsed.get("CLIP_AUDIO")
         )
+        self.wake_word_input_options = {
+            DEFAULT_WAKE_WORD_MICROPHONE_LABEL: "",
+            **_available_pulse_wake_word_sources(),
+            **_available_wake_word_microphones(),
+        }
+        self.wake_word_input_value_to_label = {
+            value: label for label, value in self.wake_word_input_options.items()
+        }
+        original_wake_word_input = str(
+            parsed.get("WAKE_WORD_INPUT_DEVICE") or ""
+        )
+        if (
+            original_wake_word_input
+            and original_wake_word_input
+            not in self.wake_word_input_value_to_label
+        ):
+            self.wake_word_input_options[CUSTOM_WAKE_WORD_MICROPHONE_LABEL] = (
+                original_wake_word_input
+            )
+            self.wake_word_input_value_to_label[original_wake_word_input] = (
+                CUSTOM_WAKE_WORD_MICROPHONE_LABEL
+            )
         self.clip_audio_options = {
             **CLIP_AUDIO_LABEL_TO_VALUE,
             **_available_clipping_microphones(),
@@ -460,14 +583,31 @@ class SettingsWindow:
         ttk.Label(
             voice,
             text=(
-                "Recording ends after this much silence, or at the maximum "
-                "utterance length. Longer silence gives you more time to pause "
-                "between phrases."
+                "The wake-word microphone is independent of command recording. "
+                "The threshold is the model score, not a calibrated probability: "
+                "lower values are more sensitive and can cause more false wakes; "
+                "higher values may miss the wake word."
             ),
             wraplength=560,
             style="Muted.TLabel",
         ).grid(
             row=len(VOICE_DEFAULTS) + 1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(4, 0),
+        )
+        ttk.Label(
+            voice,
+            text=(
+                "Command recording ends after this much silence, or at the "
+                "maximum utterance length. Longer silence gives you more time "
+                "to pause between phrases."
+            ),
+            wraplength=560,
+            style="Muted.TLabel",
+        ).grid(
+            row=len(VOICE_DEFAULTS) + 2,
             column=0,
             columnspan=2,
             sticky="w",
@@ -497,6 +637,8 @@ class SettingsWindow:
         parent.columnconfigure(1, weight=1)
         labels = {
             "MAX_TOOL_CALLS_PER_REQUEST": "Maximum tool calls per request",
+            "WAKE_WORD_INPUT_DEVICE": "Wake-word microphone",
+            "WAKE_WORD_THRESHOLD_PERCENT": "Wake-word score threshold (%)",
             "JARVIS_TTS_DEVICE": "Speech synthesis device",
             "JARVIS_TTS_CPU_THREADS": "Speech CPU threads",
             "VOICE_SILENCE_SECONDS": "End recording after silence (seconds)",
@@ -517,6 +659,11 @@ class SettingsWindow:
                 value = self.clip_audio_value_to_label.get(
                     microphone,
                     NO_MICROPHONE_LABEL,
+                )
+            elif key == "WAKE_WORD_INPUT_DEVICE":
+                value = self.wake_word_input_value_to_label.get(
+                    stored_value,
+                    DEFAULT_WAKE_WORD_MICROPHONE_LABEL,
                 )
             else:
                 value = stored_value
@@ -571,6 +718,13 @@ class SettingsWindow:
                     parent,
                     textvariable=variable,
                     values=tuple(self.clip_audio_options),
+                    state="readonly",
+                ).grid(row=row, column=1, sticky="ew", pady=5)
+            elif key == "WAKE_WORD_INPUT_DEVICE":
+                ttk.Combobox(
+                    parent,
+                    textvariable=variable,
+                    values=tuple(self.wake_word_input_options),
                     state="readonly",
                 ).grid(row=row, column=1, sticky="ew", pady=5)
             elif key == "JARVIS_TTS_DEVICE":
@@ -969,6 +1123,24 @@ class SettingsWindow:
         if not 1 <= cpu_threads <= 32:
             raise ValueError("TTS CPU threads must be between 1 and 32.")
         values["JARVIS_TTS_CPU_THREADS"] = str(cpu_threads)
+        try:
+            threshold_percent = int(values["WAKE_WORD_THRESHOLD_PERCENT"])
+        except ValueError as exc:
+            raise ValueError(
+                "Wake-word score threshold must be a whole number from 1 to 100."
+            ) from exc
+        if not 1 <= threshold_percent <= 100:
+            raise ValueError(
+                "Wake-word score threshold must be a whole number from 1 to 100."
+            )
+        values["WAKE_WORD_THRESHOLD_PERCENT"] = str(threshold_percent)
+        selected_wake_word_input = values["WAKE_WORD_INPUT_DEVICE"]
+        if selected_wake_word_input in self.wake_word_input_options:
+            values["WAKE_WORD_INPUT_DEVICE"] = self.wake_word_input_options[
+                selected_wake_word_input
+            ]
+        else:
+            raise ValueError("Choose a valid wake-word microphone option.")
         for key, minimum, maximum in (
             ("VOICE_SILENCE_SECONDS", 0.3, 5.0),
             ("VOICE_MAX_UTTERANCE_SECONDS", 5.0, 180.0),

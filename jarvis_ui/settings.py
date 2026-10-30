@@ -35,6 +35,7 @@ else:
 
 GENERAL_DEFAULTS = {
     "OPENAI_MODEL": "gpt-4.1-mini",
+    "MAX_TOOL_CALLS_PER_REQUEST": "20",
     "JARVIS_UI_THEME": "dark",
     "CONVERSATION_TIMEOUT_SECONDS": "12",
     "STATUS_INDICATOR_ALWAYS_ON_TOP": "true",
@@ -495,6 +496,7 @@ class SettingsWindow:
     ) -> None:
         parent.columnconfigure(1, weight=1)
         labels = {
+            "MAX_TOOL_CALLS_PER_REQUEST": "Maximum tool calls per request",
             "JARVIS_TTS_DEVICE": "Speech synthesis device",
             "JARVIS_TTS_CPU_THREADS": "Speech CPU threads",
             "VOICE_SILENCE_SECONDS": "End recording after silence (seconds)",
@@ -942,6 +944,17 @@ class SettingsWindow:
 
         if not values["OPENAI_MODEL"]:
             raise ValueError("OPENAI_MODEL cannot be empty.")
+        try:
+            tool_call_limit = int(values["MAX_TOOL_CALLS_PER_REQUEST"])
+        except ValueError as exc:
+            raise ValueError(
+                "Maximum tool calls per request must be a whole number from 1 to 100."
+            ) from exc
+        if not 1 <= tool_call_limit <= 100:
+            raise ValueError(
+                "Maximum tool calls per request must be from 1 to 100."
+            )
+        values["MAX_TOOL_CALLS_PER_REQUEST"] = str(tool_call_limit)
         values["JARVIS_UI_THEME"] = values["JARVIS_UI_THEME"].casefold()
         if values["JARVIS_UI_THEME"] not in {"dark", "light"}:
             raise ValueError("Jarvis UI theme must be dark or light.")

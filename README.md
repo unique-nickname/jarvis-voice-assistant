@@ -103,7 +103,10 @@ The settings window keeps unrelated lines in the config file, saves it with
 user-only file permissions, and applies changes the next time Jarvis starts.
 The **Applications** tab edits the friendly names and single executable paths
 that the `open_application` tool may launch. It does not accept shell commands
-or executable arguments. The **General** tab selects the dark or light UI theme.
+or executable arguments. The **General** tab selects the dark or light UI theme
+and sets the maximum tool calls per user request (default 20, configurable from
+1 to 100). The assistant also retains a separate internal limit of five tool
+rounds for a normal request and six for a conversational turn.
 The **Voice** tab controls Kokoro's compute device and the microphone's silence
 and utterance limits. In **Clipping**, system audio is enabled by default and
 the microphone dropdown selects no microphone, the default microphone, or a

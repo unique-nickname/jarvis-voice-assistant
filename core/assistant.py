@@ -12,6 +12,8 @@ from tools.registry import TOOLS, TOOL_HANDLERS
 client = OpenAI()
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 MAX_CONVERSATION_TURNS = 20
+DEFAULT_MAX_TOOL_CALLS_PER_REQUEST = 20
+MAX_TOOL_CALLS_PER_REQUEST_LIMIT = 100
 
 
 @dataclass
@@ -200,6 +202,22 @@ def ask(
     tool_handlers: Mapping[str, Callable[..., Any]] | None = None,
     conversation: AssistantConversation | None = None,
 ) -> str:
+    try:
+        max_tool_calls = int(
+            os.getenv(
+                "MAX_TOOL_CALLS_PER_REQUEST",
+                str(DEFAULT_MAX_TOOL_CALLS_PER_REQUEST),
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "MAX_TOOL_CALLS_PER_REQUEST must be a whole number from 1 to 100."
+        ) from exc
+    if not 1 <= max_tool_calls <= MAX_TOOL_CALLS_PER_REQUEST_LIMIT:
+        raise ValueError(
+            "MAX_TOOL_CALLS_PER_REQUEST must be a whole number from 1 to 100."
+        )
+
     active_tools = list(TOOLS if tools is None else tools)
     active_handlers = TOOL_HANDLERS if tool_handlers is None else tool_handlers
     instructions = INSTRUCTIONS
@@ -233,6 +251,7 @@ def ask(
     response = client.responses.create(**request)
 
     max_tool_rounds = 6 if conversation is not None else 5
+    tool_calls_executed = 0
 
     for tool_round in range(max_tool_rounds + 1):
         calls = [
@@ -248,10 +267,15 @@ def ask(
 
         if tool_round == max_tool_rounds:
             break
+        if tool_calls_executed >= max_tool_calls:
+            break
 
         outputs = []
 
         for call in calls:
+            if tool_calls_executed >= max_tool_calls:
+                break
+            tool_calls_executed += 1
             try:
                 if (
                     conversation is not None
@@ -278,6 +302,9 @@ def ask(
                 "output": json.dumps(result),
             })
 
+        if len(outputs) < len(calls):
+            break
+
         emit_runtime_status("thinking")
         response = client.responses.create(
             model=MODEL,
@@ -290,4 +317,4 @@ def ask(
     if conversation is not None:
         conversation.continue_listening = False
 
-    return "I reached the maximum number of tool calls."
+    return "I reached the tool-call limit for this request."
